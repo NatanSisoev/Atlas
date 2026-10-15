@@ -70,6 +70,8 @@ Security:
   preflight that is never answered) and, if it has an `Origin`, a same-host one → 403.
 - JSON bodies ≤ 5 MB, `Content-Type: application/json` (415 otherwise). Uploads ≤ 300 MB,
   streamed to disk while hashing; over-limit requests get 413 and the connection is closed.
+- External decoders never sniff: ImageMagick gets an explicit coder from the extension
+  (`png:file[0]`), ffmpeg/ffprobe get `-f <demuxer>` and `-protocol_whitelist file`.
 - `X-Content-Type-Options: nosniff`. Uploaded HTML/JS is never served as active
   content; SVG served with `Content-Security-Policy: sandbox`; unknown types forced
   to download.
@@ -81,6 +83,7 @@ Security:
 ### API
 
 - `GET /api/health` → `{ok, version, workspace:{title}, counts:{local, boards, goproLinks}, tools:{ffmpeg, magick, exiftool}}`
+  (`counts.local` is `null` while a first media scan is still running; health never blocks on it)
 - `GET /api/settings` / `PUT /api/settings` — `{title, people:[{name,color}], displayDir}`
 
 Boards:
@@ -105,7 +108,7 @@ MediaRef:
 
 Local media:
 - `GET /api/local` → `{items:[{path, name, label, index, type:"photo"|"video", size, mtime, capturedAt, width, height, durationSec, hasDisplay}]}` sorted by filename. `index` = leading number if the name starts with digits + `_`; `label` = rest of name, underscores → spaces. Metadata from one batched `exiftool -json -n` run, cached in `cache/local-index.json` keyed by path+size+mtime, indexed incrementally. Recursive (skip dot-folders and the display folder).
-- `GET /media/local/thumb/<path>?w=400` (w 64..1200) → cached JPEG; photos via magick (`-auto-orient -thumbnail`), videos via ffmpeg frame at 1 s; prefer the display copy as source; de-duplicated jobs, ≤ 3 concurrent processes; placeholder on failure.
+- `GET /media/local/thumb/<path>?w=400` (w snapped up to 128/200/400/800/1200) → cached JPEG; photos via magick (`-auto-orient -thumbnail`), videos via ffmpeg frame at 1 s; prefer the display copy as source; de-duplicated jobs, ≤ 3 concurrent processes; placeholder on failure.
 - `GET /media/local/display/<path>` → display copy if present else original.
 - `GET /media/local/original/<path>[?download=1]`
 
@@ -166,9 +169,17 @@ Mechanics:
     link", items grouped by local capture day (`capturedAt` + `tz`), select items
     or whole days, "Add N to board".
 - Autosave: debounce 700 ms, `If-Match` rev, status pill
-  (Saved / Saving… / Offline / Conflict), 409 → toast "Reload latest" with a
-  localStorage safety copy; `keepalive` save on pagehide. Never lose text.
-- Boards menu: list, switch, create, rename, delete (→ trash); remember last board.
+  (Saved / Saving… / Offline / Conflict); every change is mirrored to a localStorage
+  safety copy (restored automatically on load when it never reached the server).
+  409 → toast "Reload latest" (the local version is first saved as a new board
+  "<title> (my copy)") or "Keep mine" (overwrite; the server keeps a backup);
+  `keepalive` save on pagehide. Never lose text.
+- Viewport is remembered per board and per device (localStorage) and written into the
+  board doc with the next content save, so panning alone never creates backups.
+- Boards menu: list, switch, create, rename, delete (→ trash), **Export for Obsidian**
+  (JSON Canvas `.canvas` download: local media → file nodes relative to the workspace,
+  notes/messages → text nodes, links → link nodes, frames → groups, strings → edges,
+  GoPro photos → text nodes with the remote image); remember last board.
 - Phone: compact toolbar, bottom sheet, **Lock** (default on touch: pan + tap to
   view only) / **Edit** toggle, pinch zoom, safe-area insets, ≥40px targets.
 - Performance: hundreds of cards smooth; lazy images, `decoding="async"`,
