@@ -13,6 +13,7 @@ import { initLibrary, openLibrary, closeLibrary, toggleLibrary, libraryOpen, ref
 import { initUploads, pickFiles } from './uploads.js';
 import { markDirty, flush, setStatus, checkLocalCopy, resetForBoard, onReloadRequested } from './save.js';
 import { downloadCanvas } from './export.js';
+import { exportPdf } from './print.js';
 
 const undo = createUndo();
 const LS = {
@@ -504,6 +505,7 @@ async function boardsMenu() {
   items.push('hr',
     { label: 'New board…', icon: 'plus', run: newBoard },
     { label: 'Rename this board…', icon: 'edit', run: renameBoard },
+    { label: 'Export as PDF…', icon: 'download', run: () => { finishEditing(); state.selection.clear(); refreshSelection(); exportPdf(); } },
     { label: 'Export for Obsidian (.canvas)', icon: 'download', run: () => downloadCanvas(state.board) },
     { label: 'Delete this board…', icon: 'trash', danger: true, run: deleteBoard });
   showMenu(document.getElementById('boardBtn'), items);

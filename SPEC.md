@@ -177,7 +177,10 @@ Mechanics:
   `keepalive` save on pagehide. Never lose text.
 - Viewport is remembered per board and per device (localStorage) and written into the
   board doc with the next content save, so panning alone never creates backups.
-- Boards menu: list, switch, create, rename, delete (→ trash), **Export for Obsidian**
+- Boards menu: list, switch, create, rename, delete (→ trash), **Export as PDF** (browser
+  print → "Save as PDF": the whole board on one page sized to fit it, light colours,
+  title + date header, every image loaded at print resolution first; Ctrl+P prints the
+  same layout), **Export for Obsidian**
   (JSON Canvas `.canvas` download: local media → file nodes relative to the workspace,
   notes/messages → text nodes, links → link nodes, frames → groups, strings → edges,
   GoPro photos → text nodes with the remote image); remember last board.

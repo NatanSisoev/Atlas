@@ -65,8 +65,9 @@ folder with `"displayDir": "my-folder"` in `.atlas/settings.json`.
 - **Lock / Edit** (E): phones start locked, so you can pan, pinch and tap to view
   without moving anything by accident. Switch to Edit to rearrange; long-press a card
   for its menu.
-- Boards menu (top left): several boards per folder, rename, delete, and **Export
-  for Obsidian** (a `.canvas` file; save it into a vault that contains this folder
+- Boards menu (top left): several boards per folder, rename, delete, **Export as
+  PDF** (choose "Save as PDF" in the print dialog; the whole board goes on one page),
+  and **Export for Obsidian** (a `.canvas` file; save it into a vault that contains this folder
   and the local photos show up).
 - Press **?** for all keyboard shortcuts.
 
