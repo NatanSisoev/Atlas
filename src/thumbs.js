@@ -7,11 +7,20 @@ import { clamp } from './util.js';
 
 const BROWSER_IMAGES = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif']);
 
-export function thumbWidth(raw, lo = 64, hi = 1200, dflt = 400) {
+export const THUMB_WIDTHS = [128, 200, 400, 800, 1200];
+
+/** Snap a requested width up to a fixed step (bounded cache); lo/hi clamp first. */
+export function thumbWidth(raw, lo = 64, hi = 1200, dflt = 400, steps = THUMB_WIDTHS) {
   const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return dflt;
-  return Math.round(clamp(n, lo, hi) / 8) * 8;
+  const w = !Number.isFinite(n) || n <= 0 ? dflt : clamp(n, lo, hi);
+  return steps ? steps.find((s) => s >= w) || steps.at(-1) : Math.round(w);
 }
+
+// Never let ImageMagick/ffmpeg pick a decoder by sniffing file contents: an upload named
+// .png that is really MVG/MSL/SVG (or an .mp4 that is really an HLS playlist) could make
+// them read other files. The decoder always follows the extension.
+const MAGICK_CODER = { '.jpg': 'jpeg', '.jpeg': 'jpeg', '.png': 'png', '.webp': 'webp', '.gif': 'gif', '.heic': 'heic', '.heif': 'heic', '.avif': 'avif', '.pdf': 'pdf' };
+export const FFMPEG_DEMUXER = { '.mp4': 'mov', '.m4v': 'mov', '.mov': 'mov', '.webm': 'matroska' };
 
 export function placeholderSvg(kind = 'file', label = '') {
   const icons = {
@@ -33,17 +42,20 @@ export function createThumbs(cfg, tools, log = () => {}) {
 
   async function generate(src, kind, w, dest) {
     const tmp = `${dest}.${crypto.randomBytes(4).toString('hex')}.tmp.jpg`;
+    const ext = path.extname(src).toLowerCase();
     let ok = false;
-    if (kind === 'video' && tools.ffmpeg) {
+    if (kind === 'video' && tools.ffmpeg && FFMPEG_DEMUXER[ext]) {
       for (const ss of ['1', '0']) {
         const r = await run(tools.ffmpeg, [
-          '-hide_banner', '-loglevel', 'error', '-y', '-ss', ss, '-i', src,
+          '-hide_banner', '-loglevel', 'error', '-y', '-protocol_whitelist', 'file', '-ss', ss, '-f', FFMPEG_DEMUXER[ext], '-i', src,
           '-frames:v', '1', '-vf', `scale='min(${w},iw)':-2`, '-q:v', '4', '-f', 'image2', tmp,
         ], { timeout: 60_000 });
         if (r.ok && (await fsp.stat(tmp).then((s) => s.size > 0, () => false))) { ok = true; break; }
       }
-    } else if ((kind === 'photo' || kind === 'pdf') && tools.magick) {
-      const input = kind === 'pdf' ? ['-density', '96', `${src}[0]`, '-background', 'white', '-flatten'] : [`${src}[0]`, '-auto-orient'];
+    } else if ((kind === 'photo' || kind === 'pdf') && tools.magick && MAGICK_CODER[ext]) {
+      const input = kind === 'pdf'
+        ? ['-density', '96', `pdf:${src}[0]`, '-background', 'white', '-flatten']
+        : [`${MAGICK_CODER[ext]}:${src}[0]`, '-auto-orient'];
       const r = await run(tools.magick.cmd, [
         ...tools.magick.prefix, ...input,
         '-thumbnail', `${w}x${w * 3}>`, '-strip', '-quality', '82', '-interlace', 'JPEG', `jpg:${tmp}`,

@@ -4,7 +4,7 @@ import { el, icon, toast, showMenu, closeMenu, menuOpen, dialog, prompt, confirm
 import {
   state, bus, view, applyViewport, zoomAt, fitAll, viewCenter, renderAll, renderCard, renderStrings, refreshSelection,
   removeCardEl, updateEmpty, updateVisibility, cardById, elFor, newId, maxZ, polaroidHeight, isMedia, setEditMode,
-  normaliseZ, NOTE_COLORS, YARN_COLORS, positionCard,
+  normaliseZ, NOTE_COLORS, YARN_COLORS, positionCard, animateTo,
 } from './board.js';
 import { createUndo } from './undo.js';
 import { initInteractions } from './interactions.js';
@@ -12,6 +12,7 @@ import { openLightbox, closeLightbox, lightboxOpen } from './lightbox.js';
 import { initLibrary, openLibrary, closeLibrary, toggleLibrary, libraryOpen, refreshLibrary } from './library.js';
 import { initUploads, pickFiles } from './uploads.js';
 import { markDirty, flush, setStatus, checkLocalCopy, resetForBoard, onReloadRequested } from './save.js';
+import { downloadCanvas } from './export.js';
 
 const undo = createUndo();
 const LS = {
@@ -236,8 +237,16 @@ async function dialogEdit(card, fn) {
   renderStrings();
 }
 
+/** On phones, bring the card being edited to the top of the screen, above the keyboard. */
+function focusCardForTyping(card) {
+  if (!isTouch()) return;
+  const zoom = Math.min(2, Math.max(view.zoom, (innerWidth * 0.8) / card.w));
+  animateTo({ zoom, x: innerWidth / 2 - (card.x + card.w / 2) * zoom, y: 76 - card.y * zoom }, 200);
+}
+
 function inlineEdit(card, host, field, tag) {
   if (!host) return;
+  focusCardForTyping(card);
   pushUndo();
   const input = el(tag, { 'aria-label': field, maxLength: tag === 'input' ? 200 : 100000, spellcheck: true });
   input.value = card[field] || '';
@@ -494,6 +503,7 @@ async function boardsMenu() {
   items.push('hr',
     { label: 'New board…', icon: 'plus', run: newBoard },
     { label: 'Rename this board…', icon: 'edit', run: renameBoard },
+    { label: 'Export for Obsidian (.canvas)', icon: 'download', run: () => downloadCanvas(state.board) },
     { label: 'Delete this board…', icon: 'trash', danger: true, run: deleteBoard });
   showMenu(document.getElementById('boardBtn'), items);
 }

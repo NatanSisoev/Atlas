@@ -30,18 +30,19 @@ export function hostAllowed(hostHeader, cfg) {
  * State-changing requests must carry a custom header (forces a CORS preflight that we never
  * answer, so other websites cannot forge them) and, when present, a same-host Origin.
  */
-export function checkCsrf(req) {
+export function checkCsrf(req, cfg = {}) {
   if (req.method === 'GET' || req.method === 'HEAD') return;
   if (req.headers['x-requested-with'] !== 'corkboard') throw new HttpError(403, 'missing X-Requested-With header');
   const origin = req.headers.origin;
-  if (origin && origin !== 'null') {
+  if (origin) {
     let host;
     try {
       host = new URL(origin).host.toLowerCase();
     } catch {
       throw new HttpError(403, 'bad origin');
     }
-    if (host !== String(req.headers.host || '').toLowerCase()) throw new HttpError(403, 'cross-origin request');
+    // Same host, or one of our own names (a reverse proxy such as Tailscale Serve may rewrite Host).
+    if (host !== String(req.headers.host || '').toLowerCase() && !hostAllowed(host, cfg)) throw new HttpError(403, 'cross-origin request');
   }
 }
 

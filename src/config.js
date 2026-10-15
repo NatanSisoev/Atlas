@@ -65,7 +65,18 @@ export async function loadConfig({ folder, flags = {}, env = process.env }) {
   for (const d of [paths.boards, paths.backups, paths.uploads, paths.gopro, paths.thumbs, paths.trash]) {
     await fsp.mkdir(d, { recursive: true });
   }
-  const settings = await readJson(paths.settingsFile, {});
+  let settings = {};
+  try {
+    settings = await readJson(paths.settingsFile);
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      // Keep the unreadable file for the user instead of overwriting it later.
+      const aside = `${paths.settingsFile}.unreadable-${Date.now()}`;
+      await fsp.rename(paths.settingsFile, aside).catch(() => {});
+      console.warn(`settings.json was unreadable; moved to ${aside} and using defaults.`);
+    } else if (err.code !== 'ENOENT') throw err;
+  }
+  if (!isPlainObject(settings)) settings = {};
   const portRaw = flags.port ?? env.PORT ?? settings.port ?? DEFAULT_PORT;
   const port = Number(portRaw);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error(`bad port: ${portRaw}`);
@@ -93,9 +104,7 @@ export async function loadConfig({ folder, flags = {}, env = process.env }) {
 /** The display-copies folder: settings.displayDir (relative to workspace or absolute) or <workspace>/compressed. */
 export function resolveDisplayDir(cfg) {
   const configured = cfg.settings.displayDir;
-  const candidates = configured
-    ? [path.resolve(cfg.workspace, configured)]
-    : [path.join(cfg.workspace, 'compressed'), path.join(cfg.dataDir, 'display')];
+  const candidates = configured ? [path.resolve(cfg.workspace, configured)] : [path.join(cfg.workspace, 'compressed')];
   for (const candidate of candidates) {
     try {
       if (fs.statSync(candidate).isDirectory()) return candidate;

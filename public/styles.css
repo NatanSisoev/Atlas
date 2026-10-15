@@ -51,10 +51,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 #world { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; will-change: transform; }
 #cards { position: absolute; left: 0; top: 0; }
-#strings { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; z-index: 100000; pointer-events: none; }
+#strings { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; z-index: 1500000; pointer-events: none; }
 #strings path.yarn { fill: none; stroke-linecap: round; pointer-events: stroke; cursor: pointer; }
 #strings path.yarn-shadow { fill: none; stroke: rgba(30, 12, 0, 0.28); stroke-linecap: round; }
-#strings path.hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; cursor: pointer; }
+#strings path.hit { fill: none; stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer; }
 #strings g.selected path.yarn { stroke-dasharray: 8 5; }
 
 #empty {
@@ -363,7 +363,7 @@ kbd { font: 12px/1 var(--ui); background: #f1e8da; border: 1px solid #d8ccb9; bo
   #zoombar { bottom: auto; top: calc(62px + var(--safe-t)); right: calc(12px + var(--safe-r)); }
   #zoomOut, #zoomIn, #zoomPct { display: none; }
   #library {
-    top: auto; left: 0; right: 0; bottom: 0; width: 100%; height: min(78vh, calc(100vh - 60px)); border-radius: 18px 18px 0 0;
+    top: auto; left: 0; right: 0; bottom: 0; width: 100%; height: min(78vh, calc(100vh - 60px)); height: min(78dvh, calc(100dvh - 60px)); border-radius: 18px 18px 0 0;
     animation: rise .2s ease-out;
   }
   @keyframes rise { from { transform: translateY(40px); opacity: 0; } }

@@ -109,7 +109,7 @@ export async function flush() {
   if (dirty && !conflict && !timer) schedule(DEBOUNCE);
 }
 
-function resolveConflict(choice) {
+async function resolveConflict(choice) {
   const current = conflict;
   if (!current || current.deleted || !state.board) return;
   conflict = null;
@@ -117,14 +117,22 @@ function resolveConflict(choice) {
     state.rev = current.rev;
     dirty = true;
     flush();
-  } else {
-    // Keep the losing local version around under a separate key, never just drop it.
-    store(`corkboard:conflict:${state.board.id}:${Date.now()}`, JSON.stringify({ doc: state.board }));
-    store(key(state.board.id), null);
-    dirty = false;
-    setStatus('saved', 'Saved');
-    onConflictReload(current);
+    return;
   }
+  // "Reload latest" never throws our version away: it becomes its own board first.
+  const mine = JSON.parse(JSON.stringify(state.board));
+  try {
+    const copy = await api.createBoard(`${mine.title} (my copy)`);
+    await api.saveBoard({ ...copy, cards: mine.cards, strings: mine.strings, viewport: mine.viewport }, copy.rev);
+    toast(`Your version was kept as the board “${copy.title}”.`, { timeout: 8000 });
+  } catch (err) {
+    store(`corkboard:conflict:${mine.id}:${Date.now()}`, JSON.stringify({ doc: mine }));
+    toast(`Could not save your version as a separate board (${err.message}); it is kept on this device.`, { error: true, timeout: 0 });
+  }
+  store(key(mine.id), null);
+  dirty = false;
+  setStatus('saved', 'Saved');
+  onConflictReload(current);
 }
 
 /** Called after a board is loaded from the server: offer or apply an unsaved local copy. */

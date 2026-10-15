@@ -30,12 +30,14 @@ export async function createApp(cfg, tools, { log = console.log, fetchImpl } = {
 
   // ---- API ----
   route('GET', /^\/api\/health$/, async (req, res) => {
-    const items = await local.list();
+    // Never wait for a first full media scan here (it can take a while on big folders).
+    let localCount = local.peekCount();
+    if (localCount == null) localCount = await Promise.race([local.list().then((i) => i.length), new Promise((r) => setTimeout(() => r(null), 1500))]);
     sendJson(res, 200, {
       ok: true,
       version: VERSION,
       workspace: { title: cfg.settings.title },
-      counts: { local: items.length, boards: await boards.count(), goproLinks: await gopro.count() },
+      counts: { local: localCount, boards: await boards.count(), goproLinks: await gopro.count() },
       tools: toolSummary(tools),
     });
   });
@@ -81,7 +83,7 @@ export async function createApp(cfg, tools, { log = console.log, fetchImpl } = {
     if (path.resolve(original).startsWith(path.resolve(cfg.dataDir) + path.sep)) throw new HttpError(404, 'not found');
     if (preferDisplay) {
       const disp = local.findDisplay(rel);
-      if (disp) return { file: await resolveInside(cfg.displayRoot, path.relative(cfg.displayRoot, disp).split(path.sep).join('/')), type, rel };
+      if (disp) return { file: await resolveInside(disp.root, disp.rel), type, rel };
     }
     return { file: original, type, rel };
   }
@@ -106,7 +108,7 @@ export async function createApp(cfg, tools, { log = console.log, fetchImpl } = {
   route('GET', /^\/media\/gopro\/thumb\/([^/]+)$/, async (req, res, m, url) => {
     const token = decodeURIComponent(m[1]);
     if (!TOKEN_RE.test(token)) throw new HttpError(404, 'not found');
-    redirect(res, thumbUrl(token, thumbWidth(url.searchParams.get('w'), 100, 2560, 450)), 86400);
+    redirect(res, thumbUrl(token, thumbWidth(url.searchParams.get('w'), 100, 2560, 450, null)), 86400);
   });
   route('GET', /^\/media\/gopro\/play\/([^/]+)$/, async (req, res, m, url) => {
     if (!MEDIUM_RE.test(m[1])) throw new HttpError(404, 'not found');
@@ -193,7 +195,7 @@ export async function createApp(cfg, tools, { log = console.log, fetchImpl } = {
     }
     const pathname = url.pathname;
     if (pathname.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
-    checkCsrf(req);
+    checkCsrf(req, cfg);
     const method = req.method === 'HEAD' ? 'GET' : req.method;
     let pathMatched = false;
     for (const r of routes) {

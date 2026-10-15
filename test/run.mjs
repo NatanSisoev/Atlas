@@ -277,6 +277,10 @@ async function integration(ws, tools) {
         r = await R('GET', '/media/local/thumb/0001_beach_day.jpg?w=200&v=1');
         assert.match(r.headers['cache-control'], /immutable/);
       }
+      if (tools.magick) {
+        r = await R('GET', '/media/local/thumb/0001_beach_day.jpg?w=150');
+        assert.equal((await import('../src/imageinfo.js')).parseImageInfo(r.buf).width, 200, 'widths snap to fixed steps');
+      }
       r = await R('GET', '/media/local/thumb/day%20two/0003_sunset_%C3%A9.png?w=99999');
       assert.equal(r.status, 200);
       assert.match(r.headers['content-type'], /^image\//);
@@ -402,6 +406,18 @@ async function integration(ws, tools) {
       assert.ok(!fs.existsSync(path.join(ws, 'setup.exe')));
     });
 
+    await test('uploads: decoders follow the extension, never the content', async () => {
+      const mvg = "push graphic-context\nviewbox 0 0 640 480\nimage over 0,0 0,0 'text:/etc/passwd'\npop graphic-context\n";
+      const r = await R('POST', '/api/uploads', { body: mvg, headers: { 'Content-Type': 'image/png', 'X-Filename': 'innocent.png' } });
+      const t = await R('GET', r.json.thumbUrl);
+      assert.equal(t.status, 200);
+      assert.ok(!/^image\/jpeg/.test(t.headers['content-type']), 'ImageMagick must not render MVG disguised as PNG');
+      const hls = '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:10.0,\nconcat:file:///etc/passwd\n#EXT-X-ENDLIST\n';
+      const v = await R('POST', '/api/uploads', { body: hls, headers: { 'Content-Type': 'video/mp4', 'X-Filename': 'clip.mp4' } });
+      const vt = await R('GET', v.json.thumbUrl);
+      assert.match(vt.headers['content-type'], /^image\/svg\+xml/, 'ffmpeg must not read an HLS playlist disguised as MP4');
+    });
+
     await test('uploads: limits', async () => {
       const r = await R('POST', '/api/uploads', { body: Buffer.alloc(10), headers: { 'Content-Type': 'application/octet-stream', 'X-Filename': 'big.bin', 'Content-Length': String(400 * 1024 * 1024) } }).catch((e) => ({ status: 'reset', e }));
       assert.ok(r.status === 413 || r.status === 'reset', String(r.status));
@@ -486,12 +502,15 @@ async function integration(ws, tools) {
 async function noTools(ws) {
   console.log('\nwithout external tools (CORKBOARD_NO_TOOLS=1)');
   fs.rmSync(path.join(ws, '.corkboard'), { recursive: true, force: true });
+  fs.mkdirSync(path.join(ws, '.corkboard'));
+  fs.writeFileSync(path.join(ws, '.corkboard', 'settings.json'), '{"title": "half-written');
   const srv = await startServer(ws, { CORKBOARD_NO_TOOLS: '1' });
   const R = (m, p, o) => request(srv.port, m, p, o);
   try {
     await test('degrades gracefully', async () => {
       const h = (await R('GET', '/api/health')).json;
       assert.deepEqual(h.tools, { ffmpeg: false, magick: false, exiftool: false });
+      assert.ok(fs.readdirSync(path.join(ws, '.corkboard')).some((n) => n.startsWith('settings.json.unreadable-')), 'corrupt settings kept aside');
       const items = (await R('GET', '/api/local')).json.items;
       assert.ok(items.length >= 2);
       let r = await R('GET', '/media/local/thumb/0001_beach_day.jpg?w=200');

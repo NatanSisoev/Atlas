@@ -37,6 +37,9 @@ function openBrowser(url) {
 }
 
 async function serve() {
+  // A bug in one request must never take the server (and unsaved work) down.
+  process.on('unhandledRejection', (err) => console.error(`unhandled: ${err && err.stack ? err.stack : err}`));
+  process.on('uncaughtException', (err) => console.error(`uncaught: ${err && err.stack ? err.stack : err}`));
   const cfg = await loadConfig({ folder, flags: args.flags });
   const tools = await detectTools();
   const { server } = await createApp(cfg, tools, { log: (m) => console.log(m) });
@@ -89,7 +92,8 @@ async function prepare() {
   const apply = Boolean(args.flags.apply);
   const items = await createLocalIndex(cfg, tools).list();
   const missing = items.filter((i) => !i.hasDisplay);
-  const outRoot = cfg.displayRoot || path.join(cfg.dataDir, 'display');
+  // Never write next to the user's media: generated copies live in .corkboard/display.
+  const outRoot = path.join(cfg.dataDir, 'display');
   console.log(`${missing.length} of ${items.length} files have no display copy. Target folder: ${outRoot}`);
   if (!missing.length) return;
   const plan = missing.map((i) => {

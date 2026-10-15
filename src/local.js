@@ -6,6 +6,7 @@ import { readJson, writeJsonAtomic, writeFileAtomic } from './util.js';
 import { run } from './tools.js';
 import { readImageInfo, exifDateToIso } from './imageinfo.js';
 import { isInside } from './security.js';
+import { FFMPEG_DEMUXER } from './thumbs.js';
 
 export const PHOTO_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic']);
 export const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.webm']);
@@ -25,6 +26,8 @@ export function labelFor(name) {
   return { index: m ? Number(m[1]) : null, label: rest.replace(/_+/g, ' ').trim() };
 }
 
+const samePath = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+
 async function walk(root, skip, rel = '', out = []) {
   let entries;
   try {
@@ -37,7 +40,7 @@ async function walk(root, skip, rel = '', out = []) {
     const r = rel ? `${rel}/${e.name}` : e.name;
     const abs = path.join(root, r);
     if (e.isDirectory()) {
-      if (skip.some((s) => s === abs)) continue;
+      if (skip.some((s) => samePath(s, abs))) continue;
       await walk(root, skip, r, out);
     } else if (e.isFile() && MEDIA_EXT.has(path.extname(e.name).toLowerCase())) {
       out.push(r);
@@ -60,19 +63,23 @@ export function createLocalIndex(cfg, tools, log = () => {}) {
     return cache;
   }
 
-  /** Display copy for rel: same relative path in the display folder, or same stem as .jpg/.mp4. */
+  /**
+   * Display copy for rel → {root, rel} or null. Looks in the display folder, then in
+   * .corkboard/display (written by `prepare --apply`): same relative path, or same stem as .jpg/.mp4.
+   */
   function findDisplay(rel) {
-    const root = cfg.displayRoot;
-    if (!root) return null;
+    const roots = [cfg.displayRoot, path.join(cfg.dataDir, 'display')].filter(Boolean);
     const type = mediaType(rel);
     const stem = rel.slice(0, rel.length - path.extname(rel).length);
     const candidates = [rel, `${stem}${type === 'video' ? '.mp4' : '.jpg'}`, `${stem}${path.extname(rel).toUpperCase()}`];
-    for (const c of candidates) {
-      const abs = path.resolve(root, c);
-      if (!isInside(root, abs)) continue;
-      try {
-        if (fs.statSync(abs).isFile()) return abs;
-      } catch {}
+    for (const root of [...new Set(roots)]) {
+      for (const c of candidates) {
+        const abs = path.resolve(root, c);
+        if (!isInside(root, abs)) continue;
+        try {
+          if (fs.statSync(abs).isFile()) return { root, rel: c };
+        } catch {}
+      }
     }
     return null;
   }
@@ -107,7 +114,9 @@ export function createLocalIndex(cfg, tools, log = () => {}) {
 
   async function ffprobeInfo(abs) {
     if (!tools.ffprobe) return {};
-    const r = await run(tools.ffprobe, ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', abs], { timeout: 30_000 });
+    const demuxer = FFMPEG_DEMUXER[path.extname(abs).toLowerCase()];
+    if (!demuxer) return {};
+    const r = await run(tools.ffprobe, ['-v', 'error', '-protocol_whitelist', 'file', '-f', demuxer, '-print_format', 'json', '-show_format', '-show_streams', abs], { timeout: 30_000 });
     if (!r.ok) return {};
     try {
       const j = JSON.parse(r.stdout.toString('utf8'));
@@ -223,5 +232,11 @@ export function createLocalIndex(cfg, tools, log = () => {}) {
     return running;
   }
 
-  return { list, findDisplay, invalidate: () => { lastAt = 0; } };
+  /** Last known count without waiting for a scan (starts one in the background). */
+  function peekCount() {
+    if (!last && !running) list().catch(() => {});
+    return last ? last.length : null;
+  }
+
+  return { list, findDisplay, peekCount, invalidate: () => { lastAt = 0; } };
 }

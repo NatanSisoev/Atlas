@@ -76,10 +76,15 @@ function onDown(e, ctx) {
   if (pointers.size > 2) return;
 
   const t = e.target;
-  const node = t.closest('.card');
+  let stringId = t.closest('[data-string]')?.dataset.string;
+  let node = t.closest('.card');
+  // Yarn lies on top of cards: when locked (or in connect mode) taps go through it to the card below.
+  if (stringId && (!state.edit || state.tool === 'connect')) {
+    node = document.elementsFromPoint(e.clientX, e.clientY).map((x) => x.closest?.('.card')).find(Boolean) || null;
+    stringId = null;
+  }
   const card = node ? cardById(node.dataset.id) : null;
   const handle = t.closest('.handle');
-  const stringId = t.closest('[data-string]')?.dataset.string;
   const base = { sx: e.clientX, sy: e.clientY, t0: performance.now(), moved: false, card, pointerType: e.pointerType };
 
   // Middle button always pans.
