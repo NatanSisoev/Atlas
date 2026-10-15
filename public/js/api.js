@@ -1,4 +1,4 @@
-// Thin client for the corkboard server API.
+// Thin client for the atlas server API.
 
 export class ApiError extends Error {
   constructor(status, message, body) {
@@ -9,7 +9,7 @@ export class ApiError extends Error {
 }
 
 async function request(method, url, { body, headers = {}, keepalive = false } = {}) {
-  const init = { method, headers: { 'X-Requested-With': 'corkboard', ...headers }, keepalive, cache: 'no-store' };
+  const init = { method, headers: { 'X-Requested-With': 'atlas', ...headers }, keepalive, cache: 'no-store' };
   if (body !== undefined) {
     init.body = JSON.stringify(body);
     init.headers['Content-Type'] = 'application/json';
@@ -52,7 +52,7 @@ export const api = {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/uploads');
-      xhr.setRequestHeader('X-Requested-With', 'corkboard');
+      xhr.setRequestHeader('X-Requested-With', 'atlas');
       xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name || 'pasted.png'));
       xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
       xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);

@@ -106,7 +106,7 @@ function show() {
     else if (/^video\//.test(s.mime || '')) media.append(el('video', { src: url, controls: true, playsInline: true }));
     else media.append(el('div.lb-msg', { text: `${s.name || 'This file'} can't be previewed here. Use Download.` }));
   } else if (card.type === 'note' || card.type === 'message') {
-    media.append(el('div.lb-note', { text: card.text || '', style: { background: card.type === 'note' ? (card.color || '#fff27a') : '#fff' } }));
+    media.append(el('div.lb-note', { text: card.text || '', style: { background: card.type === 'note' ? (card.color || '#fdf3c4') : '#fff' } }));
   }
 
   if (s.kind === 'local') {

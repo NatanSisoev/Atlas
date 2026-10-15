@@ -1,8 +1,8 @@
-# corkboard
+# Atlas
 
-A local-first cork board for memories. Pin photos, videos, notes, chat messages,
-flight tickets, screenshots and links onto an infinite board, tie them together
-with red yarn, and look at them from your laptop or your phone. Media is read
+A local-first canvas for memories. Place photos, videos, notes, chat messages,
+flight tickets, screenshots and links on an infinite board, connect related
+things, and look at them from your laptop or your phone. Media is read
 **in place** from a folder on disk and from **GoPro share links**: no login, no
 uploads to anyone, no copying.
 
@@ -13,17 +13,17 @@ uploads to anyone, no copying.
 Requires [Node.js](https://nodejs.org) 20 or newer and nothing else.
 
 ```
-node bin/corkboard.js serve "C:\path\to\your\folder"
+node bin/atlas.js serve "C:\path\to\your\folder"
 ```
 
 Then open <http://localhost:5180>. Add `--open` to open the browser for you, or
-`--port 5181` for another port. On Windows you can also use `corkboard.cmd serve "…"`.
+`--port 5181` for another port. On Windows you can also use `atlas.cmd serve "…"`.
 
 Other commands:
 
 ```
-node bin/corkboard.js info "C:\path\to\your\folder"      # what the app sees, which tools it found
-node bin/corkboard.js prepare "C:\path\to\your\folder"   # dry run: which display copies are missing
+node bin/atlas.js info "C:\path\to\your\folder"      # what the app sees, which tools it found
+node bin/atlas.js prepare "C:\path\to\your\folder"   # dry run: which display copies are missing
 ```
 
 ### Optional tools
@@ -45,7 +45,7 @@ If the folder has a `compressed` subfolder with smaller copies that use the **sa
 filenames** (e.g. 2000 px JPGs and 1080p H.264 MP4s), the board and the viewer use
 those, which keeps phones fast and makes HEVC videos playable everywhere. The
 viewer always has **Open original** for the full-quality file. Use a different
-folder with `"displayDir": "my-folder"` in `.corkboard/settings.json`.
+folder with `"displayDir": "my-folder"` in `.atlas/settings.json`.
 
 ## Using it
 
@@ -58,8 +58,8 @@ folder with `"displayDir": "my-folder"` in `.corkboard/settings.json`.
 - **Add**: sticky notes (N, or double-click empty board), chat messages (people and
   colours in Settings), links, frames, and files (tickets, PDFs, screenshots). You
   can also drop files on the board or paste a screenshot with Ctrl+V.
-- **String** (C): tap two cards to tie them together; tap the yarn to recolour or
-  remove it.
+- **Connect** (C): tap two cards to draw a line between them; tap a line to
+  recolour or remove it.
 - Double-click a photo or video to view it full screen (arrows/swipe for next).
   Double-click a note to write, or a caption to change it.
 - **Lock / Edit** (E): phones start locked, so you can pan, pinch and tap to view
@@ -72,7 +72,7 @@ folder with `"displayDir": "my-folder"` in `.corkboard/settings.json`.
 
 ## Where your data lives
 
-Everything the app writes goes into `<your folder>/.corkboard/`. Your photos and
+Everything the app writes goes into `<your folder>/.atlas/`. (A folder that already has a `.corkboard/` from before the rename keeps using it.) Your photos and
 videos are never modified, moved or deleted.
 
 | Path | What |
@@ -85,7 +85,7 @@ videos are never modified, moved or deleted.
 | `cache/` | thumbnails and the media index; safe to delete |
 | `settings.json` | title, people, display folder |
 
-**To back up, copy the whole folder** (it includes `.corkboard`). To restore an
+**To back up, copy the whole folder** (it includes `.atlas`). To restore an
 older version of a board, stop the server and copy a file from
 `backups/<id>/` over `boards/<id>.json`. To undelete a board, move it from
 `trash/boards/` back into `boards/` and drop the timestamp prefix from the name.
@@ -101,7 +101,7 @@ use [Tailscale](https://tailscale.com) (free), which keeps it private to your ow
 devices:
 
 1. Install Tailscale on the laptop and the phone and sign in with the same account.
-2. Start corkboard on the laptop as usual, then run (once; it survives restarts):
+2. Start Atlas on the laptop as usual, then run (once; it survives restarts):
 
    ```
    tailscale serve --bg 5180
@@ -113,9 +113,9 @@ devices:
 To stop sharing: `tailscale serve --https=443 off` (or `tailscale serve reset`).
 
 **Never use `tailscale funnel`** for this: Funnel publishes the board to the whole
-internet, and corkboard has no login.
+internet, and Atlas has no login.
 
-The laptop has to be awake with corkboard running. GoPro videos play straight
+The laptop has to be awake with Atlas running. GoPro videos play straight
 from GoPro; local videos stream from the laptop, so display copies help a lot.
 
 ## Tests
@@ -137,8 +137,8 @@ $env:GOPRO_TEST_LINK="https://gopro.com/v/…"; node test/run.mjs  # PowerShell
 
 - **A video shows "cannot play"**: the original is probably 4K HEVC. Add a 1080p
   H.264 copy with the same name to `compressed/`, or run `prepare --apply` with
-  ffmpeg installed (it writes copies to `.corkboard/display/`), or use *Open original*.
-- **Port 5180 is busy**: another corkboard is running, or use `--port 5181`
+  ffmpeg installed (it writes copies to `.atlas/display/`), or use *Open original*.
+- **Port 5180 is busy**: another Atlas is running, or use `--port 5181`
   (and `tailscale serve --bg 5181`).
 - **Photos show placeholders**: the file was moved or renamed since it was pinned;
-  move it back, or remove the card and pin it again from the Library.
+  move it back, or remove the card and add it again from the Library.

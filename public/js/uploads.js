@@ -50,14 +50,14 @@ export function initUploads(context) {
   const stage = document.getElementById('stage');
   stage.addEventListener('dragover', (e) => {
     const types = [...(e.dataTransfer?.types || [])];
-    if (types.includes('Files') || types.includes('application/x-corkboard-items')) {
+    if (types.includes('Files') || types.includes('application/x-atlas-items')) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
     }
   });
   stage.addEventListener('drop', (e) => {
     const at = screenToWorld(e.clientX, e.clientY);
-    const items = e.dataTransfer?.getData('application/x-corkboard-items');
+    const items = e.dataTransfer?.getData('application/x-atlas-items');
     if (items) {
       e.preventDefault();
       try { ctx.addMedia(JSON.parse(items), at); } catch {}

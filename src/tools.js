@@ -20,7 +20,7 @@ async function probe(cmd, args) {
  * ImageMagick 7 is `magick`; ImageMagick 6 is `convert` (never on Windows, where `convert` is a disk tool).
  */
 export async function detectTools(env = process.env) {
-  if (env.CORKBOARD_NO_TOOLS === '1') return { ffmpeg: null, ffprobe: null, magick: null, exiftool: null };
+  if ((env.ATLAS_NO_TOOLS || env.CORKBOARD_NO_TOOLS) === '1') return { ffmpeg: null, ffprobe: null, magick: null, exiftool: null };
   const [ffmpeg, ffprobe, magick7, exiftool] = await Promise.all([
     probe('ffmpeg', ['-hide_banner', '-version']),
     probe('ffprobe', ['-hide_banner', '-version']),

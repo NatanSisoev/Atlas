@@ -1,5 +1,5 @@
 // Export a board as JSON Canvas (https://jsoncanvas.org), the format Obsidian uses for .canvas files.
-const COLORS = { '#ffc2d4': '1', '#ffd29a': '2', '#fff27a': '3', '#c8f2b4': '4', '#b9e3ff': '5', '#ddd0ff': '6' };
+const COLORS = { '#fbe1df': '1', '#ffc2d4': '1', '#ffd29a': '2', '#fdf3c4': '3', '#fff27a': '3', '#dcf2e4': '4', '#c8f2b4': '4', '#dde9fb': '5', '#b9e3ff': '5', '#ebe3fb': '6', '#ddd0ff': '6' };
 
 function goproImage(src) {
   if (!src.token) return null;

@@ -1,4 +1,5 @@
 node_modules/
+.atlas/
 .corkboard/
 _work/
 *.log

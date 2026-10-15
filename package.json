@@ -1,13 +1,13 @@
 {
-  "name": "corkboard",
+  "name": "atlas",
   "version": "0.1.0",
   "private": true,
-  "description": "A local-first cork board for memories: photos, videos, notes and GoPro share links on an infinite board.",
+  "description": "A local-first canvas for memories: photos, videos, notes and GoPro share links on an infinite board.",
   "type": "module",
-  "bin": { "corkboard": "bin/corkboard.js" },
+  "bin": { "atlas": "bin/atlas.js" },
   "engines": { "node": ">=20" },
   "scripts": {
-    "start": "node bin/corkboard.js serve",
+    "start": "node bin/atlas.js serve",
     "test": "node test/run.mjs"
   }
 }

@@ -32,7 +32,7 @@ export function hostAllowed(hostHeader, cfg) {
  */
 export function checkCsrf(req, cfg = {}) {
   if (req.method === 'GET' || req.method === 'HEAD') return;
-  if (req.headers['x-requested-with'] !== 'corkboard') throw new HttpError(403, 'missing X-Requested-With header');
+  if (req.headers['x-requested-with'] !== 'atlas') throw new HttpError(403, 'missing X-Requested-With header');
   const origin = req.headers.origin;
   if (origin) {
     let host;
@@ -100,8 +100,8 @@ export const SECURITY_HEADERS = {
 export const APP_CSP = [
   "default-src 'self'",
   "script-src 'self'",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com data:",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
   "img-src 'self' data: blob: https://*.gopro.com",
   "media-src 'self' blob: https://*.gopro.com",
   "connect-src 'self'",

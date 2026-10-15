@@ -65,7 +65,7 @@ export function createLocalIndex(cfg, tools, log = () => {}) {
 
   /**
    * Display copy for rel → {root, rel} or null. Looks in the display folder, then in
-   * .corkboard/display (written by `prepare --apply`): same relative path, or same stem as .jpg/.mp4.
+   * .atlas/display (written by `prepare --apply`): same relative path, or same stem as .jpg/.mp4.
    */
   function findDisplay(rel) {
     const roots = [cfg.displayRoot, path.join(cfg.dataDir, 'display')].filter(Boolean);

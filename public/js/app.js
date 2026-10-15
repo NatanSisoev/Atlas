@@ -1,4 +1,4 @@
-// Corkboard app: boards, toolbar, editing, keyboard, and wiring between modules.
+// Atlas app: boards, toolbar, editing, keyboard, and wiring between modules.
 import { api } from './api.js';
 import { el, icon, toast, showMenu, closeMenu, menuOpen, dialog, prompt, confirm, isDialogOpen, safeHttpUrl, isTouch } from './ui.js';
 import {
@@ -60,7 +60,7 @@ function doUndo(redo = false) {
 }
 
 // ---------------------------------------------------------------- creating cards
-const tilt = () => Math.round((Math.random() * 5 - 2.5) * 10) / 10;
+const tilt = () => 0; // cards sit straight; rotate by hand if wanted
 
 function addCards(cards, { select = true } = {}) {
   if (!state.edit) setEditMode(true);
@@ -137,7 +137,7 @@ function addUploads(results, at) {
 }
 
 function addNoteAt(at, text = '') {
-  const [c] = addCards([cardAt('note', at, { text, color: NOTE_COLORS[Math.floor(Math.random() * 5)].value })]);
+  const [c] = addCards([cardAt('note', at, { text, color: LS.get('atlas:noteColor') || NOTE_COLORS[1].value })]);
   if (!text) setTimeout(() => editCard(c), 30);
 }
 
@@ -203,7 +203,7 @@ function linkDialog(card) {
 function fileDialog(card) {
   return dialog('Edit ticket', (body) => {
     const title = el('input', { type: 'text', value: card.title || card.src?.name || '', maxLength: 200 });
-    const caption = el('input', { type: 'text', value: card.caption || '', placeholder: 'A handwritten note', maxLength: 200 });
+    const caption = el('input', { type: 'text', value: card.caption || '', placeholder: 'Optional note', maxLength: 200 });
     body.append(el('label', { text: 'Title' }), title, el('label', { text: 'Note' }), caption);
     return () => ({ title: title.value.trim(), caption: caption.value.trim() });
   });
@@ -346,6 +346,7 @@ function bringToFront(back = false) {
 }
 
 function setColor(color) {
+  LS.set('atlas:noteColor', color);
   const cards = selectedCards().filter((c) => c.type === 'note');
   if (!cards.length) return;
   mutate(() => { for (const c of cards) c.color = color; });
@@ -371,7 +372,7 @@ function cardMenu(card, point) {
     { label: 'Bring to front', icon: 'front', run: () => bringToFront() },
     { label: 'Send to back', icon: 'front', run: () => bringToFront(true) },
     { label: 'Duplicate', icon: 'copy', sub: 'Ctrl+D', run: duplicateSelection },
-    { label: 'Connect with string', icon: 'link', run: () => { setTool('connect'); state.connectFrom = card.id; refreshSelection(); } },
+    { label: 'Connect to…', icon: 'link', run: () => { setTool('connect'); state.connectFrom = card.id; refreshSelection(); } },
     'hr',
     { label: 'Remove from board', icon: 'trash', sub: 'Del', danger: true, run: deleteSelection });
   showMenu(point, items);
@@ -384,7 +385,7 @@ function setTool(tool) {
   const on = tool === 'connect';
   document.getElementById('connectBtn').setAttribute('aria-pressed', String(on));
   document.getElementById('stage').classList.toggle('connecting', on);
-  if (on) toast('Tap two cards to tie them together with string. Tap String again to stop.', { timeout: 3000 });
+  if (on) toast('Tap two cards to connect them. Press Connect again to stop.', { timeout: 3000 });
   refreshSelection();
 }
 
@@ -395,7 +396,7 @@ function connectClick(card) {
   const from = state.connectFrom;
   const exists = state.board.strings.some((s) => (s.from === from && s.to === card.id) || (s.to === from && s.from === card.id));
   if (!exists) {
-    mutate((b) => b.strings.push({ id: newId('s'), from, to: card.id, color: LS.get('corkboard:yarn') || YARN_COLORS[0].value }));
+    mutate((b) => b.strings.push({ id: newId('s'), from, to: card.id, color: LS.get('atlas:yarn') || YARN_COLORS[0].value }));
   }
   state.connectFrom = card.id; // keep chaining from the last card
   refreshSelection();
@@ -413,8 +414,8 @@ function updateSelbar() {
   selbar.textContent = '';
   const cards = state.edit ? selectedCards() : [];
   if (state.edit && state.selectedString) {
-    selbar.append(el('span.sel-count', { text: 'String' }));
-    const colorBtn = selButton('Colour', 'palette', () => showMenu(colorBtn, YARN_COLORS.map((c) => ({ label: c.name, swatch: c.value, run: () => { LS.set('corkboard:yarn', c.value); setStringColor(c.value); } }))));
+    selbar.append(el('span.sel-count', { text: 'Connection' }));
+    const colorBtn = selButton('Colour', 'palette', () => showMenu(colorBtn, YARN_COLORS.map((c) => ({ label: c.name, swatch: c.value === 'default' ? 'var(--muted)' : c.value, run: () => { LS.set('atlas:yarn', c.value); setStringColor(c.value); } }))));
     selbar.append(colorBtn, selButton('Remove', 'trash', deleteSelection, { danger: true }));
     selbar.hidden = false;
     return;
@@ -444,12 +445,12 @@ async function loadBoard(id) {
   try {
     doc = await api.board(id);
   } catch (err) {
-    if (err.status === 404) { LS.set('corkboard:lastBoard', ''); return init(); }
+    if (err.status === 404) { LS.set('atlas:lastBoard', ''); return init(); }
     toast(`Could not open board: ${err.message}`, { error: true, timeout: 0, actions: [{ label: 'Retry', run: () => loadBoard(id) }] });
     return;
   }
   applyDoc(doc);
-  LS.set('corkboard:lastBoard', doc.id);
+  LS.set('atlas:lastBoard', doc.id);
   checkLocalCopy(doc, (local) => {
     state.board.cards = local.cards || [];
     state.board.strings = local.strings || [];
@@ -473,7 +474,7 @@ function applyDoc(doc) {
   updateUndoButtons();
   updateTitle();
   let vp = null;
-  try { vp = JSON.parse(LS.get(`corkboard:view:${doc.id}`) || 'null'); } catch {}
+  try { vp = JSON.parse(LS.get(`atlas:view:${doc.id}`) || 'null'); } catch {}
   renderAll();
   if (vp && Number.isFinite(vp.zoom)) { Object.assign(view, vp); applyViewport(); }
   else if (doc.cards.length) fitAll(false);
@@ -485,13 +486,13 @@ function applyDoc(doc) {
 onReloadRequested((current) => applyDoc(current));
 
 function updateTitle() {
-  const t = state.board?.title || 'Corkboard';
+  const t = state.board?.title || 'Atlas';
   document.getElementById('boardTitle').textContent = t;
-  document.title = `${t} · Corkboard`;
+  document.title = `${t} · Atlas`;
 }
 
 function saveViewport() {
-  if (state.board) LS.set(`corkboard:view:${state.board.id}`, JSON.stringify({ x: view.x, y: view.y, zoom: view.zoom }));
+  if (state.board) LS.set(`atlas:view:${state.board.id}`, JSON.stringify({ x: view.x, y: view.y, zoom: view.zoom }));
 }
 
 async function boardsMenu() {
@@ -527,12 +528,12 @@ async function renameBoard() {
 }
 
 async function deleteBoard() {
-  const ok = await confirm('Delete board?', `“${state.board.title}” will be moved to .corkboard/trash on the computer. Your photos and videos are not touched.`, { ok: 'Delete', danger: true });
+  const ok = await confirm('Delete board?', `“${state.board.title}” will be moved to .atlas/trash on the computer. Your photos and videos are not touched.`, { ok: 'Delete', danger: true });
   if (!ok) return;
   try {
     await flush();
     await api.deleteBoard(state.board.id);
-    LS.set('corkboard:lastBoard', '');
+    LS.set('atlas:lastBoard', '');
     state.board = null;
     await init();
   } catch (err) { toast(err.message, { error: true }); }
@@ -575,7 +576,7 @@ function helpDialog() {
   const keys = [
     ['Double-click', 'Edit a note / view a photo or video'], ['Double-click board', 'New note'],
     ['Drag', 'Move (shift-click to select several)'], ['Del / Backspace', 'Remove selected'], ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / redo'],
-    ['Ctrl+D', 'Duplicate'], ['N', 'New note'], ['L', 'Library'], ['C', 'String tool'], ['E', 'Lock / edit'],
+    ['Ctrl+D', 'Duplicate'], ['N', 'New note'], ['L', 'Library'], ['C', 'Connect tool'], ['E', 'Lock / edit'],
     ['F', 'Fit everything'], ['+ / −  · wheel', 'Zoom'], ['Arrows', 'Nudge (shift: 10×)'], ['Ctrl+V', 'Paste a screenshot, link or text'], ['Esc', 'Deselect / close'],
   ];
   dialog('Shortcuts', (body) => {
@@ -635,7 +636,7 @@ function onKey(e) {
 function toggleEdit() {
   finishEditing();
   setEditMode(!state.edit);
-  LS.set('corkboard:edit', state.edit ? '1' : '0');
+  LS.set('atlas:edit', state.edit ? '1' : '0');
   updateSelbar();
   if (!state.edit) toast('Locked: pan, pinch and tap to view.', { timeout: 2000 });
 }
@@ -693,19 +694,19 @@ async function init() {
   try {
     const [health, settings] = await Promise.all([api.health(), api.settings()]);
     state.settings = settings;
-    if (!health.tools.ffmpeg || !health.tools.magick) console.info('corkboard: optional tools missing', health.tools);
+    if (!health.tools.ffmpeg || !health.tools.magick) console.info('atlas: optional tools missing', health.tools);
     boardsCache = await api.boards();
   } catch (err) {
     setStatus('offline', 'Offline');
-    toast(`Cannot reach the corkboard server (${err.message}). Is it running?`, { error: true, timeout: 0, actions: [{ label: 'Retry', run: init }] });
+    toast(`Cannot reach the atlas server (${err.message}). Is it running?`, { error: true, timeout: 0, actions: [{ label: 'Retry', run: init }] });
     return;
   }
-  const last = LS.get('corkboard:lastBoard');
+  const last = LS.get('atlas:lastBoard');
   const target = boardsCache.find((b) => b.id === last) || boardsCache[0];
   await loadBoard(target.id);
 }
 
-const savedEdit = LS.get('corkboard:edit');
+const savedEdit = LS.get('atlas:edit');
 setEditMode(savedEdit ? savedEdit === '1' : !isTouch());
 wire();
 updateSelbar();

@@ -73,7 +73,7 @@ export function createBoards(cfg, log = () => {}) {
       return JSON.parse(await fsp.readFile(fileOf(id), 'utf8'));
     } catch (err) {
       if (err.code === 'ENOENT') throw new HttpError(404, 'board not found');
-      if (err instanceof SyntaxError) throw new HttpError(500, `board ${id} is unreadable; restore it from .corkboard/backups/${id}/`);
+      if (err instanceof SyntaxError) throw new HttpError(500, `board ${id} is unreadable; restore it from .atlas/backups/${id}/`);
       throw err;
     }
   }

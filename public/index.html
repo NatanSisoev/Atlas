@@ -3,14 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta name="theme-color" content="#7a5532">
-  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f4f4f2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Corkboard</title>
+  <title>Atlas</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23b8875a'/%3E%3Ccircle cx='16' cy='13' r='7' fill='%23d33b2c'/%3E%3Cpath d='M16 20v9' stroke='%23555' stroke-width='2'/%3E%3C/svg%3E">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&display=swap">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -21,14 +19,14 @@
     </div>
     <div id="vignette" aria-hidden="true"></div>
     <div id="empty" hidden>
-      <p class="hand">An empty board.</p>
-      <p>Open the <b>Library</b> to pin photos and videos, use <b>Add</b> for notes, messages and tickets, or drop files and paste screenshots anywhere.</p>
+      <p class="title">Nothing here yet</p>
+      <p>Open the Library to add photos and videos, or use Add for notes, messages and files. You can also drop files or paste a screenshot.</p>
     </div>
   </div>
 
   <header id="topbar">
     <button id="boardBtn" class="pill" aria-haspopup="menu" title="Boards">
-      <span id="boardTitle">Corkboard</span><svg class="i" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+      <span id="boardTitle">Atlas</span><svg class="i" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
     </button>
     <span id="status" class="status" data-state="saved" role="status" aria-live="polite">Saved</span>
   </header>
@@ -41,7 +39,7 @@
   <nav id="toolbar" aria-label="Tools">
     <button id="libraryBtn" class="tool" title="Library (L)"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 15l-5-5L5 20"/></svg><span>Library</span></button>
     <button id="addBtn" class="tool" title="Add" aria-haspopup="menu"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Add</span></button>
-    <button id="connectBtn" class="tool edit-only" title="Connect with string (C)" aria-pressed="false"><svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="7" r="2.2"/><path d="M5 8c2 9 12 9 14 1"/></svg><span>String</span></button>
+    <button id="connectBtn" class="tool edit-only" title="Connect cards (C)" aria-pressed="false"><svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="7" r="2.2"/><path d="M5 8c2 9 12 9 14 1"/></svg><span>Connect</span></button>
     <span class="sep edit-only"></span>
     <button id="undoBtn" class="tool icon-only edit-only" title="Undo (Ctrl+Z)" aria-label="Undo"><svg class="i" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
     <button id="redoBtn" class="tool icon-only edit-only" title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg class="i" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg></button>

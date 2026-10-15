@@ -92,7 +92,7 @@ function tile(key, type, src, { name, dur, onBoard }) {
   });
   t.addEventListener('dragstart', (e) => {
     const items = lib.selected.has(key) ? [...lib.selected.values()] : [{ type, src }];
-    e.dataTransfer.setData('application/x-corkboard-items', JSON.stringify(items));
+    e.dataTransfer.setData('application/x-atlas-items', JSON.stringify(items));
     e.dataTransfer.effectAllowed = 'copy';
   });
   return t;
@@ -246,7 +246,7 @@ function renderGopro() {
     });
     const remove = el('button.round.small', { type: 'button', title: 'Remove link', 'aria-label': 'Remove link' }, icon('x'));
     remove.addEventListener('click', async () => {
-      if (!(await confirm('Remove GoPro link?', `“${l.title}” will be removed from the library (moved to .corkboard/trash). Cards already on boards stay.`, { ok: 'Remove', danger: true }))) return;
+      if (!(await confirm('Remove GoPro link?', `“${l.title}” will be removed from the library (moved to .atlas/trash). Cards already on boards stay.`, { ok: 'Remove', danger: true }))) return;
       try { await api.deleteGoproLink(l.id); if (lib.activeLink === l.id) { lib.activeLink = null; lib.goproItems = null; } lib.links = null; await loadLinks(true); }
       catch (err) { toast(err.message, { error: true }); }
     });

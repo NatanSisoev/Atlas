@@ -23,6 +23,14 @@ export function parseArgs(argv) {
   return out;
 }
 
+/** <workspace>/.atlas, or an existing .corkboard folder from before the project was renamed. */
+export function defaultDataDir(workspace) {
+  const current = path.join(workspace, '.atlas');
+  const legacy = path.join(workspace, '.corkboard');
+  if (!fs.existsSync(current) && fs.existsSync(legacy)) return legacy;
+  return current;
+}
+
 export function dataPaths(dataDir) {
   return {
     dataDir,
@@ -60,7 +68,7 @@ export async function loadConfig({ folder, flags = {}, env = process.env }) {
   }
   if (!st.isDirectory()) throw new Error(`not a folder: ${workspace}`);
 
-  const dataDir = path.resolve(flags['data-dir'] || env.CORKBOARD_DATA_DIR || path.join(workspace, '.corkboard'));
+  const dataDir = path.resolve(flags['data-dir'] || env.ATLAS_DATA_DIR || env.CORKBOARD_DATA_DIR || defaultDataDir(workspace));
   const paths = dataPaths(dataDir);
   for (const d of [paths.boards, paths.backups, paths.uploads, paths.gopro, paths.thumbs, paths.trash]) {
     await fsp.mkdir(d, { recursive: true });

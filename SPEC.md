@@ -1,6 +1,6 @@
-# Corkboard — product spec
+# Atlas — product spec
 
-A self-hosted, local-first **cork board for memories**: pin photos, videos, notes,
+A self-hosted, local-first **canvas for memories**: place photos, videos, notes,
 chat messages, flight tickets, screenshots and links onto an infinite board, with
 media read **in place** from a folder on disk and from **GoPro share links** —
 nothing is copied or uploaded to a third party.
@@ -11,7 +11,7 @@ This file is the authoritative spec. Keep it up to date when behaviour changes.
 
 - **Your files stay where they are.** The app never modifies, moves or deletes
   media in the workspace folder. Everything it writes goes into
-  `<workspace>/.corkboard/`.
+  `<workspace>/.atlas/`.
 - **Zero dependencies, no build step.** Node ≥ 20 built-ins only (`http`, `fs`,
   `path`, `crypto`, `child_process`, `url`, global `fetch`). Vanilla JS frontend.
 - **Optional external tools**, detected at runtime with graceful fallbacks:
@@ -27,8 +27,8 @@ This file is the authoritative spec. Keep it up to date when behaviour changes.
 ## Concepts
 
 - **Workspace** — a folder of media (e.g. `C:\Users\me\Trip 2026`). Run
-  `node bin/corkboard.js serve "<folder>"`. The app keeps all its state in
-  `<folder>/.corkboard/`:
+  `node bin/atlas.js serve "<folder>"`. The app keeps all its state in
+  `<folder>/.atlas/`:
   - `settings.json` — workspace settings (title, people for message cards, display
     folder, port overrides)
   - `boards/<id>.json` — boards
@@ -45,19 +45,19 @@ This file is the authoritative spec. Keep it up to date when behaviour changes.
   of HEVC). Originals are always available via "open original".
 - **Board** — an infinite canvas of cards and strings.
 
-## CLI — `bin/corkboard.js`
+## CLI — `bin/atlas.js`
 
 - `serve <folder> [--port 5180] [--host 127.0.0.1] [--open]` — start the app.
 - `info <folder>` — print what the app sees (media counts, display copies, tools found).
 - `prepare <folder> [--dry-run]` — (optional, later) generate display copies into
-  `<folder>/.corkboard/display/` with ffmpeg/magick. **Dry-run is the default**
+  `<folder>/.atlas/display/` with ffmpeg/magick. **Dry-run is the default**
   and prints a readable report; `--apply` writes.
-- Windows helper: `corkboard.cmd` next to `bin/` that forwards to node.
+- Windows helper: `atlas.cmd` next to `bin/` that forwards to node.
 
 ## Server
 
-Config precedence: CLI flags > env (`PORT`, `HOST`, `CORKBOARD_DATA_DIR`) >
-`<workspace>/.corkboard/settings.json` > defaults (`port 5180`, `host 127.0.0.1`).
+Config precedence: CLI flags > env (`PORT`, `HOST`, `ATLAS_DATA_DIR`) >
+`<workspace>/.atlas/settings.json` > defaults (`port 5180`, `host 127.0.0.1`).
 
 Security:
 - DNS-rebinding guard: reject requests whose `Host` hostname is not `localhost`,
@@ -66,7 +66,7 @@ Security:
 - Every path from a request is resolved and must stay inside its root
   (workspace / display dir / uploads dir) → 404 otherwise. Local media limited to
   known extensions (`.jpg .jpeg .png .webp .gif .heic .mp4 .mov .m4v .webm`).
-- CSRF: every non-GET request must send `X-Requested-With: corkboard` (forces a CORS
+- CSRF: every non-GET request must send `X-Requested-With: Atlas` (forces a CORS
   preflight that is never answered) and, if it has an `Origin`, a same-host one → 403.
 - JSON bodies ≤ 5 MB, `Content-Type: application/json` (415 otherwise). Uploads ≤ 300 MB,
   streamed to disk while hashing; over-limit requests get 413 and the connection is closed.
@@ -138,16 +138,17 @@ Uploads:
 ## Frontend (`public/`)
 
 Vanilla ES modules (e.g. `api.js`, `board.js`, `interactions.js`, `library.js`,
-`lightbox.js`, `uploads.js`, `undo.js`, `ui.js`). Only external resource: a Google
-Font (handwriting, e.g. Caveat) with good offline fallbacks. Never use `innerHTML`
+`lightbox.js`, `uploads.js`, `undo.js`, `ui.js`). No external resources (system font
+stack). Never use `innerHTML`
 with untrusted strings (captions, filenames, notes, GoPro titles).
 
-Look & feel — a warm, beautiful physical cork board: CSS cork texture (gradients +
-SVG noise data URI), soft vignette; photos as polaroids with handwritten captions
-and push pins; sticky notes in handwriting; chat-bubble message cards (sender,
-time; people from settings); ticket-style file cards with preview; link cards;
-frames as labelled translucent areas; videos as polaroids with play badge and
-duration; strings as sagging red yarn (SVG) between pins.
+Look & feel — modern and minimal, light and dark (follows the system): a neutral
+canvas with a subtle dot grid that pans and scales with the view; flat rounded cards
+with soft shadows, no rotation by default; photos/videos full-bleed with a slim
+caption row (videos: play badge + duration); notes as softly tinted cards; chat-bubble
+message cards (sender dot, time; people from settings); file cards with a preview
+strip; link cards (title + host); frames as quiet rounded areas with a small label;
+connections as thin curved lines from edge to edge with small end dots.
 
 Mechanics:
 - Infinite canvas: world div with `translate() scale()`; pan (drag background /
@@ -158,7 +159,7 @@ Mechanics:
   (≤100 snapshots), Escape, keyboard help popover.
 - Double-click/tap: edit text inline; media opens a lightbox (prev/next, arrows,
   swipe, video playback, open original/download).
-- Connect tool for strings; click a string to select/delete.
+- Connect tool; click a connection to recolour or delete it.
 - Add menu: note, message, link, frame, upload; drag-and-drop files; paste
   screenshots from the clipboard; upload progress.
 - Library drawer (side on desktop, bottom sheet on phone):
@@ -202,8 +203,8 @@ on failure. Tests never touch a real workspace.
 ## Repo layout
 
 ```
-bin/corkboard.js      CLI entry
-corkboard.cmd         Windows helper
+bin/atlas.js      CLI entry
+atlas.cmd         Windows helper
 src/                  server modules (server, routes, boards, local, gopro, uploads, thumbs, security, config)
 public/               frontend
 test/                 tests + fixtures generator

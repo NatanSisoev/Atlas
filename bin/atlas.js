@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// corkboard CLI: serve | info | prepare
+// atlas CLI: serve | info | prepare
 import path from 'node:path';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -9,19 +9,19 @@ import { detectTools, run, toolSummary } from '../src/tools.js';
 import { createLocalIndex } from '../src/local.js';
 import { createApp, VERSION } from '../src/server.js';
 
-const USAGE = `corkboard ${VERSION}
+const USAGE = `atlas ${VERSION}
 
 Usage:
-  node bin/corkboard.js serve <folder> [--port 5180] [--host 127.0.0.1] [--open]
-  node bin/corkboard.js info <folder>
-  node bin/corkboard.js prepare <folder> [--apply]
+  node bin/atlas.js serve <folder> [--port 5180] [--host 127.0.0.1] [--open]
+  node bin/atlas.js info <folder>
+  node bin/atlas.js prepare <folder> [--apply]
 
-Everything the app writes goes into <folder>/.corkboard/. Your media is never modified.
+Everything the app writes goes into <folder>/.atlas/. Your media is never modified.
 `;
 
 const [major] = process.versions.node.split('.').map(Number);
 if (major < 20) {
-  console.error(`corkboard needs Node 20 or newer (you have ${process.versions.node}).`);
+  console.error(`atlas needs Node 20 or newer (you have ${process.versions.node}).`);
   process.exit(1);
 }
 
@@ -44,7 +44,7 @@ async function serve() {
   const tools = await detectTools();
   const { server } = await createApp(cfg, tools, { log: (m) => console.log(m) });
   server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') console.error(`Port ${cfg.port} is busy. Is corkboard already running? Try --port ${cfg.port + 1}.`);
+    if (err.code === 'EADDRINUSE') console.error(`Port ${cfg.port} is busy. Is atlas already running? Try --port ${cfg.port + 1}.`);
     else console.error(err.message);
     process.exit(1);
   });
@@ -53,7 +53,7 @@ async function serve() {
     const shown = cfg.host === '0.0.0.0' || cfg.host === '::' ? 'localhost' : cfg.host.includes(':') ? `[${cfg.host}]` : cfg.host;
     const url = `http://${shown === '127.0.0.1' ? 'localhost' : shown}:${port}`;
     const t = toolSummary(tools);
-    console.log(`\n  corkboard ${VERSION}`);
+    console.log(`\n  atlas ${VERSION}`);
     console.log(`  folder : ${cfg.workspace}`);
     console.log(`  data   : ${cfg.dataDir}`);
     console.log(`  display: ${cfg.displayRoot || '(none — originals are shown)'}`);
@@ -92,7 +92,7 @@ async function prepare() {
   const apply = Boolean(args.flags.apply);
   const items = await createLocalIndex(cfg, tools).list();
   const missing = items.filter((i) => !i.hasDisplay);
-  // Never write next to the user's media: generated copies live in .corkboard/display.
+  // Never write next to the user's media: generated copies live in .atlas/display.
   const outRoot = path.join(cfg.dataDir, 'display');
   console.log(`${missing.length} of ${items.length} files have no display copy. Target folder: ${outRoot}`);
   if (!missing.length) return;

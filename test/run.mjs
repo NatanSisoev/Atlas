@@ -41,7 +41,7 @@ function freePort() {
 function request(port, method, p, { headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
     const h = { Host: `127.0.0.1:${port}`, ...headers };
-    if (method !== 'GET' && method !== 'HEAD' && !('X-Requested-With' in h) && !h.__noCsrf) h['X-Requested-With'] = 'corkboard';
+    if (method !== 'GET' && method !== 'HEAD' && !('X-Requested-With' in h) && !h.__noCsrf) h['X-Requested-With'] = 'atlas';
     delete h.__noCsrf;
     for (const k of Object.keys(h)) if (h[k] === undefined) delete h[k];
     const data = body == null ? null : Buffer.isBuffer(body) ? body : Buffer.from(typeof body === 'string' ? body : JSON.stringify(body));
@@ -67,7 +67,7 @@ async function startServer(ws, env = {}) {
   const port = await freePort();
   const childEnv = { ...process.env, ...env };
   if (childEnv.HTTPS_PROXY && !childEnv.NODE_USE_ENV_PROXY) childEnv.NODE_USE_ENV_PROXY = '1';
-  const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'corkboard.js'), 'serve', ws, '--port', String(port)], {
+  const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'atlas.js'), 'serve', ws, '--port', String(port)], {
     env: childEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -112,7 +112,7 @@ async function unitTests() {
   });
   await test('path decoding rejects traversal', () => {
     assert.equal(decodeRelPath('day%20two/0003_sunset_%C3%A9.png'), 'day two/0003_sunset_é.png');
-    for (const bad of ['..%2fsecret.jpg', '%2e%2e/secret.jpg', '..', 'a/../b.jpg', 'a%5c..%5cb.jpg', 'C%3A%5Cx.jpg', '/etc/passwd', 'a//b.jpg', '.corkboard/x.json', 'a%00.jpg', '%E0%A4%A.jpg']) {
+    for (const bad of ['..%2fsecret.jpg', '%2e%2e/secret.jpg', '..', 'a/../b.jpg', 'a%5c..%5cb.jpg', 'C%3A%5Cx.jpg', '/etc/passwd', 'a//b.jpg', '.atlas/x.json', 'a%00.jpg', '%E0%A4%A.jpg']) {
       assert.throws(() => decodeRelPath(bad), undefined, bad);
     }
   });
@@ -221,7 +221,7 @@ async function integration(ws, tools) {
     });
 
     await test('boards: backups kept, delete moves to trash', async () => {
-      const bdir = path.join(ws, '.corkboard', 'backups', board.id);
+      const bdir = path.join(ws, '.atlas', 'backups', board.id);
       const backups = fs.readdirSync(bdir);
       assert.equal(backups.length, 2);
       const revs = backups.map((n) => JSON.parse(fs.readFileSync(path.join(bdir, n), 'utf8')).rev).sort();
@@ -229,10 +229,10 @@ async function integration(ws, tools) {
       const r = await R('DELETE', `/api/boards/${board.id}`);
       assert.equal(r.status, 200);
       assert.equal((await R('GET', `/api/boards/${board.id}`)).status, 404);
-      const trash = fs.readdirSync(path.join(ws, '.corkboard', 'trash', 'boards'));
+      const trash = fs.readdirSync(path.join(ws, '.atlas', 'trash', 'boards'));
       assert.equal(trash.length, 1);
       assert.match(trash[0], new RegExp(`${board.id}\\.json$`));
-      assert.ok(!fs.readdirSync(path.join(ws, '.corkboard', 'boards')).some((n) => n.endsWith('.tmp')));
+      assert.ok(!fs.readdirSync(path.join(ws, '.atlas', 'boards')).some((n) => n.endsWith('.tmp')));
     });
 
     await test('concurrent saves never interleave', async () => {
@@ -264,7 +264,7 @@ async function integration(ws, tools) {
         assert.ok(v.durationSec > 1.5 && v.durationSec < 2.5, `duration ${v.durationSec}`);
         assert.equal(v.capturedAt?.slice(0, 10), '2025-08-13');
       }
-      assert.ok(fs.existsSync(path.join(ws, '.corkboard', 'cache', 'local-index.json')));
+      assert.ok(fs.existsSync(path.join(ws, '.atlas', 'cache', 'local-index.json')));
     });
 
     await test('thumbnails', async () => {
@@ -337,7 +337,7 @@ async function integration(ws, tools) {
         '/media/local/original/C:%5CWindows%5Cwin.ini',
         '/media/local/original/C%3A/Windows/win.ini',
         '/media/local/original/notes.txt',
-        '/media/local/original/.corkboard/settings.json',
+        '/media/local/original/.atlas/settings.json',
         '/media/local/original/.hidden/0009_skip.jpg',
         '/media/local/original/%00.jpg',
         '/media/local/display/..%2fsecret.jpg',
@@ -371,7 +371,7 @@ async function integration(ws, tools) {
       assert.match(r.headers['cache-control'], /immutable/);
       r = await R('POST', '/api/uploads', { body: png, headers: { 'Content-Type': 'image/png', 'X-Filename': 'again.png' } });
       assert.equal(r.json.id, pngUp.id);
-      assert.equal(fs.readdirSync(path.join(ws, '.corkboard', 'uploads')).filter((n) => n.startsWith(pngUp.id)).length, 1);
+      assert.equal(fs.readdirSync(path.join(ws, '.atlas', 'uploads')).filter((n) => n.startsWith(pngUp.id)).length, 1);
       r = await R('GET', `${pngUp.thumbUrl}`);
       assert.equal(r.status, 200);
       assert.match(r.headers['content-type'], /^image\//);
@@ -422,7 +422,7 @@ async function integration(ws, tools) {
       const r = await R('POST', '/api/uploads', { body: Buffer.alloc(10), headers: { 'Content-Type': 'application/octet-stream', 'X-Filename': 'big.bin', 'Content-Length': String(400 * 1024 * 1024) } }).catch((e) => ({ status: 'reset', e }));
       assert.ok(r.status === 413 || r.status === 'reset', String(r.status));
       assert.equal((await R('POST', '/api/uploads', { body: Buffer.alloc(0), headers: { 'Content-Type': 'text/plain', 'X-Filename': 'empty.txt' } })).status, 400);
-      assert.ok(!fs.readdirSync(path.join(ws, '.corkboard', 'uploads')).some((n) => n.startsWith('.incoming')));
+      assert.ok(!fs.readdirSync(path.join(ws, '.atlas', 'uploads')).some((n) => n.startsWith('.incoming')));
       const big = '{"title":"' + 'x'.repeat(6 * 1024 * 1024) + '"}';
       assert.equal((await R('POST', '/api/boards', { body: big }).catch(() => ({ status: 413 }))).status, 413);
     });
@@ -500,17 +500,17 @@ async function integration(ws, tools) {
 }
 
 async function noTools(ws) {
-  console.log('\nwithout external tools (CORKBOARD_NO_TOOLS=1)');
-  fs.rmSync(path.join(ws, '.corkboard'), { recursive: true, force: true });
-  fs.mkdirSync(path.join(ws, '.corkboard'));
-  fs.writeFileSync(path.join(ws, '.corkboard', 'settings.json'), '{"title": "half-written');
-  const srv = await startServer(ws, { CORKBOARD_NO_TOOLS: '1' });
+  console.log('\nwithout external tools (ATLAS_NO_TOOLS=1)');
+  fs.rmSync(path.join(ws, '.atlas'), { recursive: true, force: true });
+  fs.mkdirSync(path.join(ws, '.atlas'));
+  fs.writeFileSync(path.join(ws, '.atlas', 'settings.json'), '{"title": "half-written');
+  const srv = await startServer(ws, { ATLAS_NO_TOOLS: '1' });
   const R = (m, p, o) => request(srv.port, m, p, o);
   try {
     await test('degrades gracefully', async () => {
       const h = (await R('GET', '/api/health')).json;
       assert.deepEqual(h.tools, { ffmpeg: false, magick: false, exiftool: false });
-      assert.ok(fs.readdirSync(path.join(ws, '.corkboard')).some((n) => n.startsWith('settings.json.unreadable-')), 'corrupt settings kept aside');
+      assert.ok(fs.readdirSync(path.join(ws, '.atlas')).some((n) => n.startsWith('settings.json.unreadable-')), 'corrupt settings kept aside');
       const items = (await R('GET', '/api/local')).json.items;
       assert.ok(items.length >= 2);
       let r = await R('GET', '/media/local/thumb/0001_beach_day.jpg?w=200');
@@ -530,7 +530,7 @@ async function noTools(ws) {
   }
 }
 
-const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'corkboard-test-'));
+const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-test-'));
 let exitCode = 0;
 try {
   const { ws, tools } = makeWorkspace(tmpRoot);

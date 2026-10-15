@@ -13,7 +13,7 @@ let conflict = null; // server's current doc when we hit a 409
 let retryMs = 0;
 let onConflictReload = () => {};
 
-const key = (id) => `corkboard:unsaved:${id}`;
+const key = (id) => `atlas:unsaved:${id}`;
 
 function store(k, v) {
   try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); return true; } catch { return false; }
@@ -126,7 +126,7 @@ async function resolveConflict(choice) {
     await api.saveBoard({ ...copy, cards: mine.cards, strings: mine.strings, viewport: mine.viewport }, copy.rev);
     toast(`Your version was kept as the board “${copy.title}”.`, { timeout: 8000 });
   } catch (err) {
-    store(`corkboard:conflict:${mine.id}:${Date.now()}`, JSON.stringify({ doc: mine }));
+    store(`atlas:conflict:${mine.id}:${Date.now()}`, JSON.stringify({ doc: mine }));
     toast(`Could not save your version as a separate board (${err.message}); it is kept on this device.`, { error: true, timeout: 0 });
   }
   store(key(mine.id), null);

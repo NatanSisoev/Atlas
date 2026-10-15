@@ -25,22 +25,22 @@ const SVGNS = 'http://www.w3.org/2000/svg';
 const cardEls = new Map();
 
 export const NOTE_COLORS = [
-  { name: 'Yellow', value: '#fff27a' },
-  { name: 'Pink', value: '#ffc2d4' },
-  { name: 'Blue', value: '#b9e3ff' },
-  { name: 'Green', value: '#c8f2b4' },
-  { name: 'Orange', value: '#ffd29a' },
-  { name: 'Lilac', value: '#ddd0ff' },
-  { name: 'White', value: '#fbf9f4' },
+  { name: 'Sand', value: '#f3eee4' },
+  { name: 'Butter', value: '#fdf3c4' },
+  { name: 'Rose', value: '#fbe1df' },
+  { name: 'Sky', value: '#dde9fb' },
+  { name: 'Mint', value: '#dcf2e4' },
+  { name: 'Lilac', value: '#ebe3fb' },
+  { name: 'White', value: '#ffffff' },
 ];
+// 'default' follows the theme (grey in light and dark).
 export const YARN_COLORS = [
-  { name: 'Red yarn', value: '#b3261e' },
-  { name: 'Blue yarn', value: '#2a5db0' },
-  { name: 'Green yarn', value: '#2e7d32' },
-  { name: 'Gold yarn', value: '#c99a1d' },
-  { name: 'Black yarn', value: '#2b2522' },
+  { name: 'Grey', value: 'default' },
+  { name: 'Blue', value: '#3b82f6' },
+  { name: 'Red', value: '#ef4444' },
+  { name: 'Green', value: '#22c55e' },
+  { name: 'Amber', value: '#f59e0b' },
 ];
-const PIN_COLORS = ['#d0352a', '#d0352a', '#2a6fd0', '#e0a81c', '#2e9b4f', '#d0352a', '#7a3fc0'];
 
 export const cardById = (id) => state.board?.cards.find((c) => c.id === id);
 export const elFor = (id) => cardEls.get(id);
@@ -60,15 +60,16 @@ function hash(s) {
 
 export const maxZ = () => state.board.cards.reduce((m, c) => Math.max(m, c.z || 0), 0);
 
-/** Polaroid height for a given width and image aspect (h/w). */
+// Media cards: full-bleed image with a slim caption row underneath.
+const CAPTION_H = 34;
+
+/** Media card height for a given width and image aspect (h/w). */
 export function polaroidHeight(w, aspect) {
-  const pad = w * 0.045;
-  return Math.round(pad + (w - 2 * pad) * aspect + 46);
+  return Math.round(w * aspect + CAPTION_H);
 }
 
 export function mediaAspect(card) {
-  const pad = card.w * 0.045;
-  return (card.h - 46 - pad) / (card.w - 2 * pad);
+  return (card.h - CAPTION_H) / card.w;
 }
 
 // ---------------------------------------------------------------- viewport
@@ -77,9 +78,11 @@ let visRaf = 0;
 
 export function applyViewport() {
   world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`;
-  const bx = Math.round(view.x);
-  const by = Math.round(view.y);
-  stage.style.backgroundPosition = `${bx}px ${by}px, ${bx}px ${by}px, ${bx}px ${by}px`;
+  // Dot grid moves and scales with the canvas, doubling its spacing when zoomed far out.
+  let grid = 24 * view.zoom;
+  while (grid < 12) grid *= 2;
+  stage.style.backgroundSize = `${grid}px ${grid}px`;
+  stage.style.backgroundPosition = `${Math.round(view.x)}px ${Math.round(view.y)}px`;
   const pct = document.getElementById('zoomPct');
   if (pct) pct.textContent = `${Math.round(view.zoom * 100)}%`;
   if (state.board) state.board.viewport = { x: Math.round(view.x), y: Math.round(view.y), zoom: +view.zoom.toFixed(3) };
@@ -167,9 +170,6 @@ export function updateVisibility() {
 }
 
 // ---------------------------------------------------------------- cards
-function pin(card) {
-  return el('div.pin', { style: { '--pin': PIN_COLORS[hash(card.id) % PIN_COLORS.length] } });
-}
 
 function mediaImg(card, onMissing) {
   const img = el('img', { alt: '', decoding: 'async', draggable: false });
@@ -212,7 +212,7 @@ function buildMedia(card) {
   }
   if (card.src?.kind === 'gopro') shot.append(el('div.source-tag', { text: 'GoPro' }));
   const caption = el('div.caption', { text: card.caption || '', dataset: { ph: '' } });
-  const node = el(`div.card.polaroid.${card.type}`, {}, el('div.body', {}, shot, caption), pin(card));
+  const node = el(`div.card.polaroid.${card.type}`, {}, el('div.body', {}, shot, caption));
   node._img = img;
   return node;
 }
@@ -221,7 +221,7 @@ function buildNote(card) {
   const text = el('div.text', { text: card.text || '' });
   const fs = card.fontSize ? `${card.fontSize}px` : null;
   return el('div.card.note', { style: { '--note': card.color || NOTE_COLORS[0].value, ...(fs ? { '--fs': fs } : {}) } },
-    el('div.body', {}, text), pin(card));
+    el('div.body', {}, text));
 }
 
 function personColor(name) {
@@ -270,8 +270,7 @@ function buildLink(card) {
     el('div.body', {},
       el('div.title', { text: card.title || host || 'Link' }),
       el('div.host', {}, icon('globe'), el('span', { text: host })),
-    ),
-    pin(card));
+    ));
 }
 
 function buildFrame(card) {
@@ -345,55 +344,58 @@ export function removeCardEl(id) {
   cardEls.delete(id);
 }
 
-// ---------------------------------------------------------------- strings
-export function pinPoint(c) {
-  const cx = c.x + c.w / 2;
-  const cy = c.y + c.h / 2;
-  const top = c.type === 'message' || c.type === 'file' ? 4 : 1;
-  const dx = 0;
-  const dy = -c.h / 2 + top;
-  const a = ((c.rot || 0) * Math.PI) / 180;
-  return { x: cx + dx * Math.cos(a) - dy * Math.sin(a), y: cy + dx * Math.sin(a) + dy * Math.cos(a) };
+// ---------------------------------------------------------------- connections
+const center = (c) => ({ x: c.x + c.w / 2, y: c.y + c.h / 2 });
+
+/** Where the line from c's centre towards p leaves c's box (plus a small gap). */
+function edgePoint(c, p) {
+  const o = center(c);
+  const dx = p.x - o.x;
+  const dy = p.y - o.y;
+  if (!dx && !dy) return o;
+  const t = Math.min(dx ? (c.w / 2 + 6) / Math.abs(dx) : Infinity, dy ? (c.h / 2 + 6) / Math.abs(dy) : Infinity);
+  return { x: o.x + dx * Math.min(1, t), y: o.y + dy * Math.min(1, t) };
 }
 
+/** A gentle curve between two points. */
 export function yarnPath(a, b) {
-  const d = Math.hypot(b.x - a.x, b.y - a.y);
-  const sag = Math.min(160, 14 + d * 0.16);
-  const mx = (a.x + b.x) / 2;
-  const my = (a.y + b.y) / 2 + sag;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const bend = Math.min(40, Math.hypot(dx, dy) * 0.08);
+  const len = Math.hypot(dx, dy) || 1;
+  const mx = (a.x + b.x) / 2 - (dy / len) * bend;
+  const my = (a.y + b.y) / 2 + (dx / len) * bend;
   return `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
 }
+
+const lineColor = (c) => (/^#[0-9a-f]{3,8}$/i.test(c || '') && !['#b3261e'].includes(c) ? c : 'var(--muted)');
 
 export function renderStrings(live = null) {
   stringsLayer.textContent = '';
   if (!state.board) return;
-  const pos = (id) => {
-    const c = live?.get(id) || cardById(id);
-    return c ? pinPoint(c) : null;
+  const get = (id) => live?.get(id) || cardById(id);
+  const mk = (tag, attrs) => {
+    const n = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    return n;
   };
   for (const s of state.board.strings) {
-    const a = pos(s.from);
-    const b = pos(s.to);
-    if (!a || !b) continue;
+    const A = get(s.from);
+    const B = get(s.to);
+    if (!A || !B) continue;
+    const a = edgePoint(A, center(B));
+    const b = edgePoint(B, center(A));
     const d = yarnPath(a, b);
+    const color = lineColor(s.color);
     const g = document.createElementNS(SVGNS, 'g');
     g.dataset.string = s.id;
     if (state.selectedString === s.id) g.classList.add('selected');
-    const shadow = document.createElementNS(SVGNS, 'path');
-    shadow.setAttribute('d', d);
-    shadow.setAttribute('class', 'yarn-shadow');
-    shadow.setAttribute('transform', 'translate(2 5)');
-    shadow.setAttribute('stroke-width', '3');
-    const yarn = document.createElementNS(SVGNS, 'path');
-    yarn.setAttribute('d', d);
-    yarn.setAttribute('class', 'yarn');
-    yarn.setAttribute('stroke', /^#[0-9a-f]{3,8}$/i.test(s.color) ? s.color : '#b3261e');
-    yarn.setAttribute('stroke-width', '3');
-    const hit = document.createElementNS(SVGNS, 'path');
-    hit.setAttribute('d', d);
-    hit.setAttribute('class', 'hit');
+    const line = mk('path', { d, class: 'yarn', 'stroke-width': '2' });
+    line.style.stroke = color;
+    const ends = [a, b].map((p) => { const e = mk('circle', { cx: p.x.toFixed(1), cy: p.y.toFixed(1), r: '4', class: 'end' }); e.style.fill = color; return e; });
+    const hit = mk('path', { d, class: 'hit' });
     hit.dataset.string = s.id;
-    g.append(shadow, yarn, hit);
+    g.append(line, ...ends, hit);
     stringsLayer.append(g);
   }
 }
