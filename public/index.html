@@ -1,1 +1,94 @@
-<!doctype html><meta charset="utf-8"><title>corkboard</title><p>Frontend coming in the next commit.</p>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#7a5532">
+  <meta name="color-scheme" content="light">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Corkboard</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23b8875a'/%3E%3Ccircle cx='16' cy='13' r='7' fill='%23d33b2c'/%3E%3Cpath d='M16 20v9' stroke='%23555' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="stage" aria-label="Board" tabindex="-1">
+    <div id="world">
+      <svg id="strings" aria-hidden="true"></svg>
+      <div id="cards"></div>
+    </div>
+    <div id="vignette" aria-hidden="true"></div>
+    <div id="empty" hidden>
+      <p class="hand">An empty board.</p>
+      <p>Open the <b>Library</b> to pin photos and videos, use <b>Add</b> for notes, messages and tickets, or drop files and paste screenshots anywhere.</p>
+    </div>
+  </div>
+
+  <header id="topbar">
+    <button id="boardBtn" class="pill" aria-haspopup="menu" title="Boards">
+      <span id="boardTitle">Corkboard</span><svg class="i" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <span id="status" class="status" data-state="saved" role="status" aria-live="polite">Saved</span>
+  </header>
+
+  <div id="corner">
+    <button id="helpBtn" class="round" title="Keyboard shortcuts (?)" aria-label="Help"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5v.01"/></svg></button>
+    <button id="settingsBtn" class="round" title="Settings" aria-label="Settings"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+  </div>
+
+  <nav id="toolbar" aria-label="Tools">
+    <button id="libraryBtn" class="tool" title="Library (L)"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 15l-5-5L5 20"/></svg><span>Library</span></button>
+    <button id="addBtn" class="tool" title="Add" aria-haspopup="menu"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Add</span></button>
+    <button id="connectBtn" class="tool edit-only" title="Connect with string (C)" aria-pressed="false"><svg class="i" viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="7" r="2.2"/><path d="M5 8c2 9 12 9 14 1"/></svg><span>String</span></button>
+    <span class="sep edit-only"></span>
+    <button id="undoBtn" class="tool icon-only edit-only" title="Undo (Ctrl+Z)" aria-label="Undo"><svg class="i" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
+    <button id="redoBtn" class="tool icon-only edit-only" title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><svg class="i" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg></button>
+    <span class="sep"></span>
+    <button id="lockBtn" class="tool" title="Lock: pan and view only (E)" aria-pressed="false"><svg class="i lock-closed" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><svg class="i lock-open" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg><span class="lock-label">Edit</span></button>
+  </nav>
+
+  <div id="zoombar" aria-label="Zoom">
+    <button id="zoomOut" class="round" title="Zoom out (−)" aria-label="Zoom out"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+    <button id="zoomPct" class="pill small" title="Reset to 100%">100%</button>
+    <button id="zoomIn" class="round" title="Zoom in (+)" aria-label="Zoom in"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button id="zoomFit" class="round" title="Fit everything (F)" aria-label="Fit everything"><svg class="i" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+  </div>
+
+  <aside id="library" aria-label="Library" hidden>
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <div class="lib-head">
+      <div class="tabs" role="tablist">
+        <button role="tab" data-tab="local" aria-selected="true">This computer</button>
+        <button role="tab" data-tab="gopro" aria-selected="false">GoPro</button>
+      </div>
+      <button id="libClose" class="round small" aria-label="Close library"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div id="libLocal" class="lib-pane"></div>
+    <div id="libGopro" class="lib-pane" hidden></div>
+    <div class="lib-foot">
+      <span id="libCount" class="muted"></span>
+      <button id="libClear" class="link-btn" hidden>Clear</button>
+      <button id="libAdd" class="primary" disabled>Add to board</button>
+    </div>
+  </aside>
+
+  <div id="lightbox" hidden aria-modal="true" role="dialog" aria-label="Viewer">
+    <div class="lb-media"></div>
+    <div class="lb-bar">
+      <div class="lb-caption"></div>
+      <div class="lb-actions"></div>
+    </div>
+    <button class="lb-prev round" aria-label="Previous"><svg class="i" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+    <button class="lb-next round" aria-label="Next"><svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+    <button class="lb-close round" aria-label="Close"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+
+  <div id="toasts" aria-live="polite"></div>
+  <div id="progress" hidden><div class="bar"></div><span class="label"></span></div>
+  <input id="fileInput" type="file" multiple hidden>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
