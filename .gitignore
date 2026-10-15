@@ -1,0 +1,9 @@
+node_modules/
+.corkboard/
+_work/
+*.log
+.env
+.env.*
+test/_tmp/
+.DS_Store
+Thumbs.db
