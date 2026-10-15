@@ -32,7 +32,8 @@ This file is the authoritative spec. Keep it up to date when behaviour changes.
   - `settings.json` — workspace settings (title, people for message cards, display
     folder, port overrides)
   - `boards/<id>.json` — boards
-  - `backups/<boardId>/<ISO>.json` — previous versions (keep newest 100)
+  - `backups/<boardId>/<ISO>_r<rev>.json` — previous versions (newest 30, then one per
+    10 minutes, at most 100 files)
   - `uploads/<sha16>.<ext>` — files added through the app (tickets, screenshots…)
   - `gopro/<linkId>.json` — cached GoPro share-link listings
   - `cache/` — thumbnails and the media index (regenerable)
@@ -65,7 +66,10 @@ Security:
 - Every path from a request is resolved and must stay inside its root
   (workspace / display dir / uploads dir) → 404 otherwise. Local media limited to
   known extensions (`.jpg .jpeg .png .webp .gif .heic .mp4 .mov .m4v .webm`).
-- JSON bodies ≤ 5 MB. Uploads ≤ 300 MB, streamed to disk while hashing.
+- CSRF: every non-GET request must send `X-Requested-With: corkboard` (forces a CORS
+  preflight that is never answered) and, if it has an `Origin`, a same-host one → 403.
+- JSON bodies ≤ 5 MB, `Content-Type: application/json` (415 otherwise). Uploads ≤ 300 MB,
+  streamed to disk while hashing; over-limit requests get 413 and the connection is closed.
 - `X-Content-Type-Options: nosniff`. Uploaded HTML/JS is never served as active
   content; SVG served with `Content-Security-Policy: sandbox`; unknown types forced
   to download.
@@ -85,8 +89,8 @@ Boards:
 - `POST /api/boards {title}` → board (201)
 - `GET /api/boards/:id`
 - `PUT /api/boards/:id` with `If-Match: <rev>` → `{rev, updatedAt}`; stale rev →
-  409 `{error:"conflict", current}`. Atomic write (temp + rename) and previous
-  version kept in `backups/`.
+  409 `{error:"conflict", current}`; missing `If-Match` → 428. Atomic write (temp + fsync +
+  rename) and previous version kept in `backups/`. Saves to one board are serialised.
 - `DELETE /api/boards/:id` → moved to `trash/`.
 
 Board doc: `{id, title, rev, createdAt, updatedAt, viewport:{x,y,zoom}, cards:[Card], strings:[{id, from, to, color}]}`
@@ -110,7 +114,7 @@ GoPro share links (verified to work anonymously — no login, no token):
 - Upstream (server-side only; `api.gopro.com` sends no CORS headers for other origins):
   - `GET https://api.gopro.com/collections/{id}?fields=title,gopro_user_id,media_count,created_at,cloneable,livestream_collection` with `Accept: application/vnd.gopro.jk.collections+json; version=2.0.0`
   - `GET https://api.gopro.com/media/items/{id}?page=N&per_page=200` with `Accept: application/vnd.gopro.jk.media+json; version=2.0.0` → `{title, media_count, items:[{type:"medium", medium:{id, filename, type:"Photo"|"Video"|"Continuous"|…, captured_at (UTC ISO), captured_at_timezone ("+03:00"), width, height, file_size, token, …}}], _pages:{current_page, total_pages, total_items}}`
-  - Images: `https://images-0{1..4}.gopro.com/resize/{W}w/{token}` (plain `<img>`, token never expires)
+  - Images: `https://images-0{1..4}.gopro.com/resize/{W}w/{token}` (plain `<img>`, token never expires). Only W ∈ {450, 640, 1280, 1920, 2560} work; other widths 404.
   - `GET https://api.gopro.com/media/{mediumId}/download` (same Accept) → `_embedded.files[]` (videos: 1080p H.264) and `_embedded.variations[]` (`source`, `high_res_proxy_mp4`, `edit_proxy` 720p, `audio_proxy`). Signed CDN URLs **expire after ~1 hour**.
   - Use a browser-like User-Agent; fetch pages sequentially; cache.
 - App routes:
@@ -118,8 +122,10 @@ GoPro share links (verified to work anonymously — no login, no token):
   - `POST /api/gopro/links {url}` → accepts full URL (with/without query or trailing slash) or bare UUID; fetches metadata + all pages; stores `gopro/<id>.json`; 400 bad URL, 404 not found, 502 upstream.
   - `POST /api/gopro/links/:id/refresh`, `DELETE /api/gopro/links/:id` (→ trash)
   - `GET /api/gopro/links/:id/items` → `{link, items:[{mediumId, filename, mediaType, capturedAt, tz, width, height, fileSize, token, durationSec}]}` sorted by capture time
-  - `GET /media/gopro/thumb/:token?w=450` → 302 to `images-0N` (N = 1 + hash(token) % 4; w 100..2048; token `^[A-Za-z0-9._-]+$`)
-  - `GET /media/gopro/play/:mediumId` → 302 to a fresh 1080p H.264 URL (prefer 1920×1080 h264 file / `high_res_proxy_mp4`, then `edit_proxy`, then `source`); cache 40 min; id `^[a-f0-9]{16,40}$`
+  - `GET /media/gopro/thumb/:token?w=450` → 302 to `images-0N` (N = 1 + hash(token) % 4; w snapped up to 450/640/1280/1920/2560; token `^[A-Za-z0-9._-]+$`)
+  - `GET /media/gopro/play/:mediumId` → 302 to a fresh 1080p H.264 URL (prefer 1920×1080 h264 file / `high_res_proxy_mp4`, then `edit_proxy`, then `source`); cache 40 min; id `^[a-f0-9]{16,40}$` and must belong to a saved link. The CDN labels
+    videos `binary/octet-stream`, so `?via=server` streams through the server as `video/mp4`
+    (Range passed through) for players that refuse it (iOS Safari).
   - `GET /media/gopro/original/:mediumId` → 302 to `source`
 
 Uploads:

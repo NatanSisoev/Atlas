@@ -1,0 +1,13 @@
+{
+  "name": "corkboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local-first cork board for memories: photos, videos, notes and GoPro share links on an infinite board.",
+  "type": "module",
+  "bin": { "corkboard": "bin/corkboard.js" },
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node bin/corkboard.js serve",
+    "test": "node test/run.mjs"
+  }
+}
