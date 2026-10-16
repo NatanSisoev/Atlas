@@ -12,8 +12,10 @@ This file is the authoritative spec. Keep it up to date when behaviour changes.
 - **Your files stay where they are.** The app never modifies, moves or deletes
   media in the workspace folder. Everything it writes goes into
   `<workspace>/.atlas/`.
-- **Zero dependencies, no build step.** Node ≥ 20 built-ins only (`http`, `fs`,
-  `path`, `crypto`, `child_process`, `url`, global `fetch`). Vanilla JS frontend.
+- **Zero runtime dependencies on the server.** Node ≥ 20 built-ins only (`http`, `fs`,
+  `path`, `crypto`, `child_process`, `url`, global `fetch`). The book (`web/`, Svelte +
+  Vite) is built into `web/dist`, which is committed, so running needs no build; the old
+  canvas (`public/`) stays vanilla JS.
 - **Optional external tools**, detected at runtime with graceful fallbacks:
   `ffmpeg`/`ffprobe` (video posters), ImageMagick `magick` (thumbnails, PDF
   first page via Ghostscript), `exiftool` (capture dates). Without them the app
@@ -56,13 +58,25 @@ This file is the authoritative spec. Keep it up to date when behaviour changes.
 
 ## Server
 
-Config precedence: CLI flags > env (`PORT`, `HOST`, `ATLAS_DATA_DIR`) >
-`<workspace>/.atlas/settings.json` > defaults (`port 5180`, `host 127.0.0.1`).
+Config precedence: CLI flags > env (`PORT`, `HOST`, `ATLAS_DATA_DIR`,
+`ATLAS_PUBLIC_HOST`) > `<workspace>/.atlas/settings.json` > defaults (`port 5180`,
+`host 127.0.0.1`). `ATLAS_WEB_DIST` points the server at another build of the web
+client (default `<repo>/web/dist`; the tests use a stand-in).
 
 Security:
 - DNS-rebinding guard: reject requests whose `Host` hostname is not `localhost`,
-  `127.0.0.1`, `[::1]`, the configured host, or (when `allowTailscale`, default
-  true) a name ending in `.ts.net` → 403.
+  `127.0.0.1`, `[::1]`, the configured host, `settings.allowedHosts`, or:
+  - when `publicHost` is set (`settings.json` → `"publicHost":
+    "atlas.tailnet-name.ts.net"`, or env `ATLAS_PUBLIC_HOST`): exactly that name, and no
+    other `*.ts.net` name. A value that is not a plain host name stops the server at startup.
+  - otherwise (backwards compatible), when `allowTailscale` (default true): any name
+    ending in `.ts.net`
+  → 403.
+- Fetch Metadata guard on reads: a `GET`/`HEAD` to `/api/*` or `/media/*` with
+  `Sec-Fetch-Site: cross-site` or `same-site` → 403. `same-origin`, `none` (typed URL,
+  bookmark) and no header (curl, older browsers) pass. Top-level navigations to the app's
+  HTML pages are not affected.
+- Every `/media/*` response carries `Cross-Origin-Resource-Policy: same-origin`.
 - Every path from a request is resolved and must stay inside its root
   (workspace / display dir / uploads dir) → 404 otherwise. Local media limited to
   known extensions (`.jpg .jpeg .png .webp .gif .heic .mp4 .mov .m4v .webm`).
@@ -77,13 +91,57 @@ Security:
   to download.
 - Range requests (206) on all media/file routes. Long immutable caching for
   thumbnails and content-addressed uploads; `no-store` for `/api`.
+- HTML pages (the web client, the old board, the build hint) are served with the app CSP:
+  `default-src 'self'; script-src 'self'` (no inline scripts), `style-src 'self'
+  'unsafe-inline'`, `font-src 'self' data:`, media and images from self (+ GoPro), `object-src
+  'none'`, `base-uri 'none'`, `form-action 'none'`, `frame-ancestors 'self'`.
+
+### Static routing
+
+- `GET /board` → 301 `/board/`; `/board/` → `public/index.html`; `/board/<file>` →
+  `public/<file>` (the old canvas, unchanged; it calls the absolute `/api/*` and
+  `/media/*` routes). Missing files → 404 (no fallback).
+- Everything else that is not `/api/*` or `/media/*` is the web client from `web/dist`:
+  - a file that exists is served as is: `/assets/*` (content-hashed) with
+    `Cache-Control: private, max-age=31536000, immutable`; everything else (`index.html`,
+    `sw.js`, `registerSW.js`, `manifest.webmanifest`, icons) with `no-cache` (revalidate
+    by ETag);
+  - SPA fallback: `/`, every path under `/c/` (item ids contain file names with dots), and
+    any other path whose last segment has no file extension → `web/dist/index.html`;
+  - other missing files → 404.
+  - When `web/dist/index.html` does not exist, the app paths answer 503 with a small static
+    page that says to run `npm run build` (and links to `/board/`).
 - Never crash on a bad request; JSON errors `{error}` with proper status; one log
   line per request.
 
 ### API
 
-- `GET /api/health` → `{ok, version, workspace:{title}, counts:{local, boards, goproLinks}, tools:{ffmpeg, magick, exiftool}}`
+- `GET /api/health` → `{ok, version, schemaVersion: 1, workspace:{title}, counts:{local, boards, goproLinks}, tools:{ffmpeg, magick, exiftool}}`
   (`counts.local` is `null` while a first media scan is still running; health never blocks on it)
+
+The book (read-only in M1; drafted at read time from the local media index, nothing stored;
+`model/time.js` and `model/view.js` are shared with the client):
+- `GET /api/atlas` → `{schemaVersion: 1, title, people:[{name,color}], chapters:[ChapterSummary]}`.
+  In M1 there is exactly one chapter, the workspace folder (`id: "folder"`, title = settings
+  title, else the folder name), drafted with `draftFolderChapter`; it is Curated when ≥ 80% of
+  the file names start with `NNNN_`. A folder without media → `chapters: []`.
+- `GET /api/chapters/:id` → `{chapter: ChapterSummary, pages:[{id, date, plate, items:[itemId]}], items:{[itemId]: Item}}`;
+  unknown id → 404 `{error}`. `plate` = `formatPlate(date)` (`{weekday:'TUE', day:'12',
+  month:'AUG', long:'Tue 12 Aug', full:'Tuesday 12 August 2025'}`) or `null` for an undated
+  page. `items` is keyed in story order.
+- ChapterSummary = `{id, title, from, to, status, range, itemCount, pageCount, photoCount, videoCount, cover: Item|null}`;
+  `from`/`to` are local days `YYYY-MM-DD` (04:00 day start) or `null`; `status` is
+  `upcoming|ongoing|past|someday`; `range` = `formatRange(from, to)` (`'10–14 Aug 2025'`) or `null`.
+- Pages: walk the story order (Curated: filename index, then name; otherwise capture time,
+  undated last) and start a page whenever the local day changes; undated items stay on the
+  current page; going back to an earlier day starts its own page. Page ids `p1, p2, …`.
+  The cover is the first photo (else the first item).
+- Item = `{id: "l:" + path, kind: "photo"|"video", name, label, index, takenLocal, w, h, durationSec, hasDisplay, urls:{t400, t1200, display, original, download}}`.
+  `takenLocal` is the capture time as the camera wrote it (local wall clock, optionally with an
+  offset suffix) or `null`; `w`/`h` may be `null`. URLs use the routes below with each path
+  segment `encodeURIComponent`-ed: `t400`/`t1200` = `/media/local/thumb/<path>?w=400|1200&v=<mtime ms>`
+  (immutable), `display` = `/media/local/display/<path>`, `original` =
+  `/media/local/original/<path>`, `download` = the original with `?download=1`.
 - `GET /api/settings` / `PUT /api/settings` — `{title, people:[{name,color}], displayDir}`
 
 Boards:
@@ -135,7 +193,7 @@ Uploads:
 - `POST /api/uploads` raw body + `Content-Type` + `X-Filename` (URI-encoded) → `{id, name, mime, size, url, thumbUrl}`; dedup by hash.
 - `GET /media/uploads/:id[?download=1]`, `GET /media/uploads/:id/thumb?w=400` (images, videos, PDFs first page; placeholder otherwise).
 
-## Frontend (`public/`)
+## Old canvas frontend (`public/`, served at `/board/`)
 
 Vanilla ES modules (e.g. `api.js`, `board.js`, `interactions.js`, `library.js`,
 `lightbox.js`, `uploads.js`, `undo.js`, `ui.js`). No external resources (system font
@@ -197,8 +255,25 @@ temp workspace of generated fixtures (tiny JPG via magick or a hand-written
 minimal JPEG/PNG if magick is missing; 2 s MP4 via ffmpeg lavfi if available) and
 checks: health, settings, boards CRUD, 409 conflict, backups, trash, local listing,
 thumb/display/original with Range (206), path traversal attempts (encoded `..`,
-backslashes, absolute paths, drive letters) → 403/404, bad Host → 403, uploads
-(PNG, PDF) round-trip, SVG sandbox header, GoPro URL parsing (unit). With
+backslashes, absolute paths, drive letters) → 403/404, bad Host → 403, exact `publicHost`
+(other `*.ts.net` names → 403), Fetch Metadata (`cross-site`/`same-site` reads → 403),
+CORP on media, the web client routing against a stand-in `web/dist` (SPA fallback, caching
+headers, the build hint when it is missing), `/board` → 301 and the old app under
+`/board/`, uploads (PNG, PDF) round-trip, SVG sandbox header, GoPro URL parsing (unit), and
+the book: a generated Curated trip folder (EXIF dates written with exiftool, or by hand
+without it; a video with ffmpeg) must draft into the expected date pages (a 01:30 photo stays
+on the evening before; a photo from an earlier day gets its own page; an undated photo
+stays put), with item URLs that resolve; unknown chapter → 404. `node test/model.mjs`
+unit-tests the shared `model/`. `node test/e2e.mjs` (optional, Playwright; SKIP when it
+is not installed) serves the built `web/dist` on a generated trip (`makeBookWorkspace`: 24
+photos in six shapes over four days, two videos, display copies in `compressed/`) and reads
+it in Chromium at 412×915 (touch) and 1440×900, light and dark: plates and page breaks,
+captions, justified rows that fill the measure and never crop, lazy thumbnails, viewer
+swipes/keys/details/close with focus returned, video fallback, Play (title → plate →
+photo, pause, Esc), reduced motion (no drift), settings (`atlas:type`, `atlas:me`), the old
+board and its library at `/board/`, no console errors, failed requests or CSP violations;
+then stops the server and reloads offline (shell, chapter and thumbnails from the service
+worker with the "Offline" line). With
 `GOPRO_TEST_LINK` set, also live: add link, items > 0, `play` redirect resolves
 to a `video/mp4` URL, thumb redirect works. Clear PASS/FAIL summary; non-zero exit
 on failure. Tests never touch a real workspace.
@@ -208,8 +283,10 @@ on failure. Tests never touch a real workspace.
 ```
 bin/atlas.js      CLI entry
 atlas.cmd         Windows helper
-src/                  server modules (server, routes, boards, local, gopro, uploads, thumbs, security, config)
-public/               frontend
+src/                  server modules (server, story, boards, local, gopro, uploads, thumbs, security, config)
+model/                pure functions shared by the server and the web client (time, view)
+web/                  the book (Svelte + Vite); built into web/dist (committed)
+public/               the old canvas, served at /board/
 test/                 tests + fixtures generator
 README.md  SPEC.md  LICENSE (later)  .gitignore
 ```

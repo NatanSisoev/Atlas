@@ -19,6 +19,12 @@ node bin/atlas.js serve "C:\path\to\your\folder"
 Then open <http://localhost:5180>. Add `--open` to open the browser for you, or
 `--port 5181` for another port. On Windows you can also use `atlas.cmd serve "…"`.
 
+- `/` is **the book**: the folder read as a chaptered photo book (read-only for now).
+  The app is built into `web/dist` and committed, so there is nothing to build to run it. In a
+  checkout without `web/dist`, `/` says so: run `npm install` and `npm run build` once.
+- `/board/` is the **canvas** (everything under "Using it" below). It keeps working
+  as before.
+
 Other commands:
 
 ```
@@ -47,7 +53,7 @@ those, which keeps phones fast and makes HEVC videos playable everywhere. The
 viewer always has **Open original** for the full-quality file. Use a different
 folder with `"displayDir": "my-folder"` in `.atlas/settings.json`.
 
-## Using it
+## Using it (the canvas at `/board/`)
 
 - **Library** (L): photos and videos from the folder, grouped by day. Tap to
   select (or "Select day"), then **Add N to board**, or drag tiles onto the board.
@@ -84,7 +90,7 @@ videos are never modified, moved or deleted.
 | `gopro/<link>.json` | cached GoPro link listings |
 | `trash/` | deleted boards and GoPro links (nothing is ever hard-deleted) |
 | `cache/` | thumbnails and the media index; safe to delete |
-| `settings.json` | title, people, display folder |
+| `settings.json` | title, people, display folder, `publicHost` |
 
 **To back up, copy the whole folder** (it includes `.atlas`). To restore an
 older version of a board, stop the server and copy a file from
@@ -110,6 +116,15 @@ devices:
 
 3. On the phone, open the `https://<laptop-name>.<tailnet>.ts.net` address that the
    command prints. Add it to the home screen for an app-like icon.
+4. Recommended: pin that exact name in `<your folder>/.atlas/settings.json`, so that no
+   other machine's `*.ts.net` name is accepted, then restart Atlas:
+
+   ```json
+   { "publicHost": "laptop-name.tailnet-name.ts.net" }
+   ```
+
+   (or set the environment variable `ATLAS_PUBLIC_HOST`). Without it, any `*.ts.net`
+   name is accepted, as before.
 
 To stop sharing: `tailscale serve --https=443 off` (or `tailscale serve reset`).
 
@@ -122,16 +137,31 @@ from GoPro; local videos stream from the laptop, so display copies help a lot.
 ## Tests
 
 ```
-node test/run.mjs
+npm test        # node test/model.mjs && node test/run.mjs
 ```
 
-This starts the server on a temporary folder of generated test files (it never
-touches your data) and checks the API, security guards, uploads and saving. With a
-GoPro share link it also checks the live GoPro integration:
+This starts the server on temporary folders of generated test files (it never
+touches your data) and checks the API, the book (chapters and pages), the routing of
+the web app and the old board, security guards, uploads and saving. The routing tests
+use a stand-in for `web/dist` (`ATLAS_WEB_DIST` points the server at another build
+folder), so they never need a build. With a GoPro share link it also checks the live
+GoPro integration:
 
 ```
 GOPRO_TEST_LINK=https://gopro.com/v/… node test/run.mjs          # macOS/Linux
 $env:GOPRO_TEST_LINK="https://gopro.com/v/…"; node test/run.mjs  # PowerShell
+```
+
+The end-to-end check reads the built app in headless Chromium (Playwright) on an
+Android-sized phone and a desktop, light and dark, against a generated trip of 24 photos
+and 2 videos: cover, story, viewer (swipes and keys), details, Play, settings, the old
+board at `/board/`, and offline from the service worker with the server stopped. It needs
+`npm run build` first and a Chromium for Playwright (`npx playwright install chromium`, or
+`PLAYWRIGHT_BROWSERS_PATH` pointing at one); without Playwright it prints SKIP.
+
+```
+npm run e2e                          # node test/e2e.mjs
+node test/e2e.mjs --shots ./shots    # also saves screenshots of every screen
 ```
 
 ## Troubleshooting

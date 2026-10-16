@@ -2,11 +2,14 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readJson, writeJsonAtomic, HttpError, isPlainObject } from './util.js';
-import { isInside } from './security.js';
+import { isInside, normalizePublicHost } from './security.js';
 
 export const DEFAULT_PORT = 5180;
 export const DEFAULT_HOST = '127.0.0.1';
+/** The built web client (committed); ATLAS_WEB_DIST points elsewhere (tests use a fake one). */
+export const DEFAULT_WEB_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'web', 'dist');
 
 export function parseArgs(argv) {
   const out = { cmd: null, positional: [], flags: {} };
@@ -96,6 +99,9 @@ export async function loadConfig({ folder, flags = {}, env = process.env }) {
     port,
     host,
     open: Boolean(flags.open),
+    webDist: path.resolve(env.ATLAS_WEB_DIST || DEFAULT_WEB_DIST),
+    // Exact public name (e.g. atlas.tailnet-name.ts.net); when set, no other *.ts.net name is accepted.
+    publicHost: normalizePublicHost(env.ATLAS_PUBLIC_HOST || settings.publicHost),
     allowTailscale: settings.allowTailscale !== false,
     allowedHosts: Array.isArray(settings.allowedHosts) ? settings.allowedHosts.map(String) : [],
     settings: {

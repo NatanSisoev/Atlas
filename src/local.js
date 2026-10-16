@@ -18,10 +18,14 @@ export function mediaType(file) {
   return PHOTO_EXT.has(ext) ? 'photo' : VIDEO_EXT.has(ext) ? 'video' : null;
 }
 
-/** "0013_p_doamnei_adv.mp4" → {index: 13, label: "p doamnei adv"} */
+/**
+ * "0013_p_doamnei_adv.mp4" → {index: 13, label: "p doamnei adv"}; a name that is only a number
+ * ("0013.jpg") keeps its place in a numbered folder: {index: 13, label: "0013"}.
+ */
 export function labelFor(name) {
   const stem = name.slice(0, name.length - path.extname(name).length);
   const m = /^(\d+)_(.*)$/.exec(stem);
+  if (!m && /^\d{1,9}$/.test(stem)) return { index: Number(stem), label: stem };
   const rest = m ? m[2] : stem;
   return { index: m ? Number(m[1]) : null, label: rest.replace(/_+/g, ' ').trim() };
 }

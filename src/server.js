@@ -1,21 +1,57 @@
 // HTTP server: routing, guards, logging.
 import http from 'node:http';
 import path from 'node:path';
+import fsp from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { HttpError, sendJson, sendError, sendFile, sendBuffer, readJsonBody, redirect, mimeFor } from './util.js';
-import { hostAllowed, checkCsrf, decodeRelPath, resolveInside, SECURITY_HEADERS, APP_CSP } from './security.js';
-import { publicSettings, updateSettings } from './config.js';
+import { hostAllowed, checkCsrf, checkFetchMetadata, decodeRelPath, resolveInside, SECURITY_HEADERS, APP_CSP } from './security.js';
+import { publicSettings, updateSettings, DEFAULT_WEB_DIST } from './config.js';
 import { createBoards } from './boards.js';
 import { createLocalIndex, mediaType } from './local.js';
 import { createThumbs, thumbWidth, placeholderSvg } from './thumbs.js';
 import { createGoPro, thumbUrl, TOKEN_RE, MEDIUM_RE } from './gopro.js';
 import { createUploads } from './uploads.js';
 import { toolSummary } from './tools.js';
+import { createStory, SCHEMA_VERSION } from './story.js';
 
+// The old canvas app, served under /board/ until the book can edit (M3).
 const PUBLIC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 export const VERSION = '0.1.0';
+
+// Files of the built web client that must be revalidated on every load (everything under
+// /assets/ is content-hashed and cached for a year).
+const WEB_NO_CACHE = new Set(['index.html', 'sw.js', 'registerSW.js', 'manifest.webmanifest']);
+
+/** Shown at / when web/dist has not been built. Static, no script (CSP script-src 'self'). */
+const BUILD_HINT = Buffer.from(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Atlas</title>
+<style>
+  body { margin: 0; font: 17px/1.5 system-ui, sans-serif; background: #f7f6f2; color: #191918; }
+  main { max-width: 34rem; margin: 18vh auto 0; padding: 0 24px; }
+  h1 { font-weight: 600; font-size: 28px; margin: 0 0 12px; }
+  pre { background: rgba(25, 25, 24, .06); padding: 12px 16px; border-radius: 8px; }
+  a { color: inherit; }
+  @media (prefers-color-scheme: dark) { body { background: #0e0e0d; color: #ecebe7; } pre { background: rgba(236, 235, 231, .08); } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Atlas is not built yet</h1>
+  <p>The web app in <code>web/</code> has not been built. In the Atlas folder run:</p>
+  <pre>npm install
+npm run build</pre>
+  <p>then reload this page. The old board still works at <a href="/board/">/board/</a>.</p>
+</main>
+</body>
+</html>
+`);
 
 export async function createApp(cfg, tools, { log = console.log, fetchImpl } = {}) {
   const boards = createBoards(cfg, log);
@@ -23,6 +59,8 @@ export async function createApp(cfg, tools, { log = console.log, fetchImpl } = {
   const thumbs = createThumbs(cfg, tools, log);
   const gopro = createGoPro(cfg, { fetchImpl: fetchImpl || globalThis.fetch, log });
   const uploads = createUploads(cfg);
+  const story = createStory(cfg, local);
+  const webDist = path.resolve(cfg.webDist || DEFAULT_WEB_DIST);
   await uploads.scan();
 
   const routes = [];
@@ -36,10 +74,25 @@ export async function createApp(cfg, tools, { log = console.log, fetchImpl } = {
     sendJson(res, 200, {
       ok: true,
       version: VERSION,
+      schemaVersion: SCHEMA_VERSION,
       workspace: { title: cfg.settings.title },
       counts: { local: localCount, boards: await boards.count(), goproLinks: await gopro.count() },
       tools: toolSummary(tools),
     });
+  });
+
+  // ---- the book (read-only in M1) ----
+  route('GET', /^\/api\/atlas$/, async (req, res) => sendJson(res, 200, await story.atlas()));
+  route('GET', /^\/api\/chapters\/([^/]+)$/, async (req, res, m) => {
+    let id;
+    try {
+      id = decodeURIComponent(m[1]);
+    } catch {
+      throw new HttpError(404, 'chapter not found');
+    }
+    const out = await story.chapter(id);
+    if (!out) throw new HttpError(404, 'chapter not found');
+    sendJson(res, 200, out);
   });
 
   route('GET', /^\/api\/settings$/, async (req, res) => sendJson(res, 200, publicSettings(cfg)));
@@ -168,20 +221,54 @@ export async function createApp(cfg, tools, { log = console.log, fetchImpl } = {
     await pipeline(Readable.fromWeb(up.body), res).catch(() => {});
   }
 
-  // ---- static frontend ----
-  async function serveStatic(req, res, pathname) {
-    let rel = pathname === '/' ? 'index.html' : pathname.slice(1);
+  // ---- static: the old board under /board/, the web client (web/dist) everywhere else ----
+  async function serveBoard(req, res, pathname, url) {
+    if (pathname === '/board') return redirect(res, `/board/${url.search}`, 3600, 301);
+    const rel = pathname === '/board/' ? 'index.html' : pathname.slice('/board/'.length);
     let file;
     try {
       file = await resolveInside(PUBLIC, decodeRelPath(rel));
     } catch {
       throw new HttpError(404, 'not found');
     }
-    const isHtml = file.endsWith('.html');
     await sendFile(req, res, file, {
       cache: 'revalidate',
-      headers: isHtml ? { 'Content-Security-Policy': APP_CSP } : {},
+      headers: file.endsWith('.html') ? { 'Content-Security-Policy': APP_CSP } : {},
     });
+  }
+
+  async function isFile(file) {
+    return fsp.stat(file).then((st) => st.isFile(), () => false);
+  }
+
+  async function sendWebIndex(req, res) {
+    const index = path.join(webDist, 'index.html');
+    if (!(await isFile(index))) {
+      return sendBuffer(req, res, BUILD_HINT, 'text/html; charset=utf-8', 'none', { 'Content-Security-Policy': APP_CSP }, 503);
+    }
+    await sendFile(req, res, index, { cache: 'revalidate', headers: { 'Content-Security-Policy': APP_CSP } });
+  }
+
+  async function serveWeb(req, res, pathname) {
+    // Client routes. /c/... always gets the app shell: item ids contain file names with dots.
+    if (pathname === '/' || pathname === '/index.html' || pathname === '/c' || pathname.startsWith('/c/')) return sendWebIndex(req, res);
+    let rel = null;
+    let file = null;
+    try {
+      rel = decodeRelPath(pathname.slice(1));
+      file = await resolveInside(webDist, rel);
+    } catch {}
+    if (file && (await isFile(file))) {
+      const html = file.endsWith('.html');
+      return sendFile(req, res, file, {
+        cache: rel.startsWith('assets/') && !WEB_NO_CACHE.has(path.posix.basename(rel)) ? 'immutable' : 'revalidate',
+        headers: html ? { 'Content-Security-Policy': APP_CSP } : {},
+      });
+    }
+    // SPA fallback: an extension-less path is a client route; a missing file is a 404.
+    const last = pathname.slice(pathname.lastIndexOf('/') + 1);
+    if (!path.posix.extname(last)) return sendWebIndex(req, res);
+    throw new HttpError(404, 'not found');
   }
 
   async function handle(req, res) {
@@ -194,7 +281,11 @@ export async function createApp(cfg, tools, { log = console.log, fetchImpl } = {
       throw new HttpError(400, 'bad url');
     }
     const pathname = url.pathname;
-    if (pathname.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+    const isApi = pathname.startsWith('/api/');
+    const isMedia = pathname.startsWith('/media/');
+    if (isApi) res.setHeader('Cache-Control', 'no-store');
+    if (isMedia) res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    if ((isApi || isMedia) && (req.method === 'GET' || req.method === 'HEAD')) checkFetchMetadata(req);
     checkCsrf(req, cfg);
     const method = req.method === 'HEAD' ? 'GET' : req.method;
     let pathMatched = false;
@@ -206,9 +297,10 @@ export async function createApp(cfg, tools, { log = console.log, fetchImpl } = {
       return r.handler(req, res, m, url);
     }
     if (pathMatched) throw new HttpError(405, 'method not allowed');
-    if (pathname.startsWith('/api/') || pathname.startsWith('/media/')) throw new HttpError(404, 'not found');
+    if (isApi || isMedia) throw new HttpError(404, 'not found');
     if (method !== 'GET') throw new HttpError(405, 'method not allowed');
-    return serveStatic(req, res, pathname);
+    if (pathname === '/board' || pathname.startsWith('/board/')) return serveBoard(req, res, pathname, url);
+    return serveWeb(req, res, pathname);
   }
 
   const server = http.createServer((req, res) => {

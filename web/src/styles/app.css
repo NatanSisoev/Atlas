@@ -1,0 +1,330 @@
+/* Atlas design tokens and base styles: paper and ink, photos are the colour. */
+
+:root {
+  color-scheme: light dark;
+
+  --paper: #f7f6f2;
+  --ink: #191918;
+  --ink-2: #5e5d59;
+  --rule: rgba(25, 25, 24, 0.1);
+  --well: rgba(25, 25, 24, 0.055);
+  --hover: rgba(25, 25, 24, 0.06);
+  --shadow: 0 1px 2px rgba(25, 25, 24, 0.06), 0 12px 32px -8px rgba(25, 25, 24, 0.22);
+  --sheet: #fbfaf7;
+
+  --serif: 'Newsreader Variable', 'Newsreader', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
+  --sans: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  /* Human words (titles, page titles, captions). The "Sans" title style swaps these to Inter. */
+  --font-human: var(--serif);
+  --title-weight: 400;
+  --title-tracking: -0.012em;
+  --plate-tracking: -0.006em;
+  --caption-size: 15px;
+  --caption-line: 20px;
+
+  --t-fast: 120ms;
+  --t-mid: 240ms;
+  --t-slow: 420ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --gutter: 16px;
+  --bar-h: 44px;
+  --col-max: 1040px;
+  --text-max: 720px;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0e0e0d;
+    --ink: #ecebe7;
+    --ink-2: #9c9a94;
+    --rule: rgba(236, 235, 231, 0.12);
+    --well: rgba(236, 235, 231, 0.06);
+    --hover: rgba(236, 235, 231, 0.08);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px -8px rgba(0, 0, 0, 0.7);
+    --sheet: #1a1a19;
+  }
+}
+
+:root[data-type='sans'] {
+  --font-human: var(--sans);
+  --title-weight: 700;
+  --title-tracking: -0.04em;
+  --plate-tracking: -0.028em;
+  --caption-size: 14px;
+  --caption-line: 20px;
+}
+
+@media (min-width: 720px) {
+  :root {
+    --gutter: 40px;
+    --caption-size: 16px;
+    --caption-line: 22px;
+  }
+  :root[data-type='sans'] {
+    --caption-size: 14px;
+    --caption-line: 20px;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scrollbar-gutter: stable;
+  background: var(--paper);
+}
+
+body {
+  margin: 0;
+  min-height: 100svh;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 24px;
+  font-kerning: normal;
+  font-optical-sizing: auto;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.locked,
+html.locked body {
+  overflow: hidden;
+}
+
+/* The viewer and Play are black; so is the reserved scrollbar gutter beside them. */
+html.locked {
+  background: #000;
+}
+
+img,
+video {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+h1,
+h2,
+h3,
+p,
+figure {
+  margin: 0;
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- Type ---------- */
+
+.t-title {
+  font-family: var(--font-human);
+  font-weight: var(--title-weight);
+  letter-spacing: var(--title-tracking);
+  font-size: 40px;
+  line-height: 44px;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+
+.t-plate {
+  font-family: var(--font-human);
+  font-weight: var(--title-weight);
+  letter-spacing: var(--plate-tracking);
+  font-size: 28px;
+  line-height: 32px;
+  text-wrap: balance;
+}
+
+.t-body {
+  font-family: var(--font-human);
+  font-size: 18px;
+  line-height: 28px;
+}
+
+.t-meta {
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.002em;
+  color: var(--ink-2);
+}
+
+.t-kicker {
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+
+.t-caption {
+  font-family: var(--font-human);
+  font-size: var(--caption-size);
+  line-height: var(--caption-line);
+  color: var(--ink-2);
+}
+
+@media (min-width: 720px) {
+  .t-title {
+    font-size: 64px;
+    line-height: 68px;
+  }
+  .t-plate {
+    font-size: 36px;
+    line-height: 40px;
+  }
+  .t-body {
+    font-size: 20px;
+    line-height: 32px;
+  }
+}
+
+/* ---------- Controls ---------- */
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    color var(--t-mid) var(--ease);
+}
+
+.icon-btn:hover {
+  background: var(--hover);
+}
+
+.text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 20px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--t-fast) var(--ease);
+}
+
+.text-btn:hover {
+  background: var(--hover);
+}
+
+.text-btn.solid {
+  border-color: transparent;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.text-btn.solid:hover {
+  background: color-mix(in srgb, var(--ink) 86%, var(--paper));
+}
+
+/* Quiet "you are reading a saved copy" line. */
+.offline-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.offline-note::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+/* ---------- View transitions ---------- */
+
+::view-transition-group(*) {
+  animation-duration: var(--t-slow);
+  animation-timing-function: var(--ease);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--t-mid);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: var(--t-mid) !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Keep the reserved scrollbar gutter the same shade as a modal's backdrop. */
+html:has(dialog[open]) {
+  background: color-mix(in srgb, var(--paper) 64%, #0e0e0d);
+}

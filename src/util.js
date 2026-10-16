@@ -41,6 +41,10 @@ export const MIME = {
   '.ogg': 'audio/ogg',
   '.pdf': 'application/pdf',
   '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf': 'font/ttf',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
 };
 
 export function mimeFor(file) {
@@ -65,8 +69,8 @@ export function sendError(res, status, message, extra) {
   sendJson(res, status, { error: message, ...(extra || {}) }, close ? { Connection: 'close' } : {});
 }
 
-export function redirect(res, url, cacheSeconds = 0) {
-  res.writeHead(302, {
+export function redirect(res, url, cacheSeconds = 0, status = 302) {
+  res.writeHead(status, {
     Location: url,
     'Cache-Control': cacheSeconds > 0 ? `private, max-age=${cacheSeconds}` : 'no-store',
     'Content-Length': 0,
@@ -271,8 +275,8 @@ export async function sendFile(req, res, file, opts = {}) {
   });
 }
 
-export function sendBuffer(req, res, buf, mime, cache = 'revalidate', extra = {}) {
-  res.writeHead(200, {
+export function sendBuffer(req, res, buf, mime, cache = 'revalidate', extra = {}, status = 200) {
+  res.writeHead(status, {
     'Content-Type': mime,
     'Content-Length': buf.length,
     'Cache-Control': cache === 'immutable' ? 'private, max-age=31536000, immutable' : cache === 'none' ? 'no-store' : 'no-cache',

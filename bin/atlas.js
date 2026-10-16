@@ -17,6 +17,7 @@ Usage:
   node bin/atlas.js prepare <folder> [--apply]
 
 Everything the app writes goes into <folder>/.atlas/. Your media is never modified.
+The book is at /, the old canvas at /board/.
 `;
 
 const [major] = process.versions.node.split('.').map(Number);
@@ -58,6 +59,8 @@ async function serve() {
     console.log(`  data   : ${cfg.dataDir}`);
     console.log(`  display: ${cfg.displayRoot || '(none — originals are shown)'}`);
     console.log(`  tools  : ffmpeg ${t.ffmpeg ? 'yes' : 'no'} · imagemagick ${t.magick ? 'yes' : 'no'} · exiftool ${t.exiftool ? 'yes' : 'no'}`);
+    console.log(`  app    : ${fs.existsSync(path.join(cfg.webDist, 'index.html')) ? cfg.webDist : `not built (${cfg.webDist}) — run npm run build`}; old board at /board/`);
+    console.log(`  names  : ${cfg.publicHost ? `localhost and ${cfg.publicHost} only` : cfg.allowTailscale ? 'localhost and any *.ts.net name (set "publicHost" to pin one)' : 'localhost only'}`);
     console.log(`\n  open ${url}  (Ctrl+C to stop)\n`);
     if (cfg.open) openBrowser(url);
   });

@@ -13,7 +13,24 @@ export function hostnameOf(hostHeader) {
   return h.split(':')[0].replace(/\.$/, '');
 }
 
-/** True when the Host header names this machine (or its Tailscale name) and not some attacker's domain. */
+const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+
+/**
+ * settings.publicHost / ATLAS_PUBLIC_HOST → a bare lowercase host name, or null when unset.
+ * Throws on anything that is not a plain DNS name (so a typo fails loudly at startup).
+ */
+export function normalizePublicHost(raw) {
+  if (raw == null || String(raw).trim() === '') return null;
+  const name = hostnameOf(String(raw).trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, ''));
+  if (!HOSTNAME_RE.test(name)) throw new Error(`bad publicHost: ${JSON.stringify(String(raw))} (expected a host name such as atlas.tailnet-name.ts.net)`);
+  return name;
+}
+
+/**
+ * True when the Host header names this machine and not some attacker's domain: localhost, the
+ * bind address, settings.allowedHosts, and either exactly cfg.publicHost (when set) or, for
+ * backwards compatibility, any *.ts.net name (unless allowTailscale is false).
+ */
 export function hostAllowed(hostHeader, cfg) {
   const name = hostnameOf(hostHeader);
   if (!name) return false;
@@ -21,9 +38,21 @@ export function hostAllowed(hostHeader, cfg) {
   const bind = String(cfg.host || '').toLowerCase();
   if (bind && bind !== '0.0.0.0' && bind !== '::') allowed.add(bind.includes(':') && !bind.startsWith('[') ? `[${bind}]` : bind);
   for (const extra of cfg.allowedHosts || []) allowed.add(String(extra).toLowerCase());
+  if (cfg.publicHost) allowed.add(String(cfg.publicHost).toLowerCase());
   if (allowed.has(name)) return true;
-  if (cfg.allowTailscale !== false && /^[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net$/.test(name)) return true;
+  if (!cfg.publicHost && cfg.allowTailscale !== false && /^[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net$/.test(name)) return true;
   return false;
+}
+
+/**
+ * Fetch Metadata guard for reads (/api/*, /media/*): browsers label every request with
+ * Sec-Fetch-Site, so a page on another site (or another *.ts.net machine: same-site) cannot read
+ * or embed our data. Requests without the header (curl, older browsers) and direct navigations
+ * ('none') pass; writes are covered by checkCsrf.
+ */
+export function checkFetchMetadata(req) {
+  const site = String(req.headers['sec-fetch-site'] || '').trim().toLowerCase();
+  if (site === 'cross-site' || site === 'same-site') throw new HttpError(403, 'cross-site request');
 }
 
 /**
