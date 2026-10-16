@@ -420,7 +420,7 @@
     gap: 12px;
     padding: 24px;
     text-align: center;
-    max-width: 22em;
+    max-width: min(100%, 1040px);
   }
 
   .kicker {
@@ -440,6 +440,8 @@
     font-size: 40px;
     line-height: 44px;
     text-wrap: balance;
+    /* A measure in the title's own size: a short title stays on one line, a long one balances. */
+    max-width: 13em;
   }
 
   .card-title.small {

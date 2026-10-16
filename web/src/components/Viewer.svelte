@@ -33,7 +33,6 @@
   );
 
   let root: HTMLDivElement;
-  let closeBtn: HTMLButtonElement;
   let stageW = $state(0);
   let chrome = $state(true);
   let info = $state(false);
@@ -65,7 +64,8 @@
     const saved = metas.map((m) => m.content);
     metas.forEach((m) => (m.content = '#000000'));
     const returnFocus = document.activeElement as HTMLElement | null;
-    closeBtn?.focus({ preventScroll: true });
+    // The dialog itself takes focus (not the close button: no stray focus ring on a deep link).
+    root?.focus({ preventScroll: true });
     return () => {
       html.classList.remove('locked');
       metas.forEach((m, i) => (m.content = saved[i]));
@@ -243,7 +243,10 @@
     if (nodes.length === 0) return;
     const first = nodes[0];
     const last = nodes[nodes.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
+    if (document.activeElement === root || !root.contains(document.activeElement)) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    } else if (e.shiftKey && document.activeElement === first) {
       e.preventDefault();
       last.focus();
     } else if (!e.shiftKey && document.activeElement === last) {
@@ -265,6 +268,8 @@
 
   $effect(() => {
     if (info) tick().then(() => root?.querySelector<HTMLElement>('.sheet [data-autofocus]')?.focus({ preventScroll: true }));
+    // The sheet closed with focus inside it: keep focus in the viewer.
+    else if (root && !root.contains(document.activeElement)) root.focus({ preventScroll: true });
   });
 
   const fade = $derived(dy > 0 ? Math.max(0.35, 1 - dy / 500) : 1);
@@ -276,6 +281,7 @@
   class="viewer"
   class:chrome
   bind:this={root}
+  tabindex="-1"
   role="dialog"
   aria-modal="true"
   aria-label="{chapterTitle}: {current?.kind === 'video' ? 'video' : 'photo'} {index + 1} of {order.length}"
@@ -333,7 +339,7 @@
   </div>
 
   <div class="top" aria-hidden={!chrome}>
-    <button class="icon-btn" bind:this={closeBtn} onclick={close} aria-label="Close" tabindex={chrome ? 0 : -1}>
+    <button class="icon-btn" onclick={close} aria-label="Close" tabindex={chrome ? 0 : -1}>
       <Icon name="close" />
     </button>
     <p class="count" aria-live="polite">{index + 1} / {order.length}</p>
@@ -410,6 +416,10 @@
     --focus: #fff;
   }
 
+  .viewer:focus {
+    outline: none;
+  }
+
   .viewer :global(:focus-visible) {
     outline-color: #fff;
   }
@@ -446,6 +456,18 @@
     padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
   }
 
+  /* Wide screens with a mouse: the photo sits between the top bar and the caption, never under them. */
+  @media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+    .slide {
+      padding: 56px 76px 84px;
+    }
+
+    .viewer .top,
+    .viewer .bottom {
+      background: none;
+    }
+  }
+
   .slide > :global(img),
   .slide > video {
     grid-area: 1 / 1;
@@ -458,13 +480,18 @@
     background: #000;
   }
 
+  /* A video that cannot play here: its poster steps back behind the message. */
+  .slide:has(.cant-play) > :global(img) {
+    opacity: 0.4;
+  }
+
   .cant-play {
     grid-area: 1 / 1;
     align-self: center;
     width: min(100% - 32px, 440px);
     padding: 20px;
     border-radius: 16px;
-    background: rgba(20, 20, 19, 0.82);
+    background: rgba(20, 20, 19, 0.88);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     text-align: left;

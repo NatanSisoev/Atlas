@@ -314,6 +314,8 @@ async function readThrough(srv, book, device, scheme) {
     await viewer.waitFor();
     await settled(page);
     assert.match(await page.locator('.viewer .count').textContent(), /^8 \/ 26$/);
+    // Focus moves into the dialog itself (keys work at once; no stray focus ring on a button).
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('role')), 'dialog');
     // t1200 first, then the display copy.
     await page.waitForFunction(() => {
       const img = document.querySelector('.viewer .slide:not([aria-hidden="true"]) img:last-of-type');
