@@ -4,8 +4,10 @@ import './styles/app.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
 import { applyType } from './lib/prefs.svelte';
+import { warmWhenControlled } from './lib/offline';
 
 applyType();
+warmWhenControlled();
 
 const target = document.getElementById('app');
 if (target) mount(App, { target });

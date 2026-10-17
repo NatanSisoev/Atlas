@@ -439,12 +439,20 @@ async function readThrough(srv, book, device, scheme) {
 async function offline(srv) {
   const { context, page, problems } = await newPage(srv.base, 'phone', 'light');
   try {
+    // One visit, never reloaded online: the worker installs and takes over during it, and the page
+    // asks again (through the worker) for the book's JSON and the thumbnails it already shows.
     await page.goto('/c/folder');
-    await page.evaluate(() => navigator.serviceWorker.ready);
-    // The first visit installs the worker; the next load goes through it and fills the caches.
-    await page.reload();
-    await page.waitForFunction(() => !!navigator.serviceWorker.controller);
     await page.locator('section.page').first().waitFor();
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 15000 });
+    await page.waitForFunction(
+      async () => {
+        const api = await caches.open('atlas-api-v1');
+        const thumbs = await caches.open('atlas-thumbs-v1');
+        return !!(await api.match('/api/chapters/folder')) && !!(await api.match('/api/atlas')) && (await thumbs.keys()).length > 0;
+      },
+      null,
+      { timeout: 15000, polling: 200 },
+    );
     await scrollThrough(page);
     await page.waitForTimeout(500);
 

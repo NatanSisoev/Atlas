@@ -21,7 +21,8 @@ Then open <http://localhost:5180>. Add `--open` to open the browser for you, or
 
 - `/` is **the book**: the folder read as a chaptered photo book (read-only for now).
   The app is built into `web/dist` and committed, so there is nothing to build to run it. In a
-  checkout without `web/dist`, `/` says so: run `npm install` and `npm run build` once.
+  checkout without `web/dist`, `/` says so: run `npm install` and `npm run build` once
+  (building needs Node.js 20.19+ or 22.12+; running the server needs only Node.js 20).
 - `/board/` is the **canvas** (everything under "Using it" below). It keeps working
   as before.
 

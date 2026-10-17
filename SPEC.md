@@ -272,8 +272,8 @@ captions, justified rows that fill the measure and never crop, lazy thumbnails, 
 swipes/keys/details/close with focus returned, video fallback, Play (title → plate →
 photo, pause, Esc), reduced motion (no drift), settings (`atlas:type`, `atlas:me`), the old
 board and its library at `/board/`, no console errors, failed requests or CSP violations;
-then stops the server and reloads offline (shell, chapter and thumbnails from the service
-worker with the "Offline" line). With
+then, after a single visit (never reloaded online), stops the server and reloads offline
+(shell, chapter and thumbnails from the service worker with the "Offline" line). With
 `GOPRO_TEST_LINK` set, also live: add link, items > 0, `play` redirect resolves
 to a `video/mp4` URL, thumb redirect works. Clear PASS/FAIL summary; non-zero exit
 on failure. Tests never touch a real workspace.

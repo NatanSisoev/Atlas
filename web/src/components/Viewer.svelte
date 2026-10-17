@@ -487,6 +487,8 @@
 
   .cant-play {
     grid-area: 1 / 1;
+    position: relative; /* above the dimmed poster (opacity makes it a layer of its own) */
+    z-index: 1;
     align-self: center;
     width: min(100% - 32px, 440px);
     padding: 20px;

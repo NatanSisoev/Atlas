@@ -57,9 +57,13 @@ export function cachedChapter(id: string): CachedChapter | null {
   return chapters.get(id) ?? null;
 }
 
+/** Every chapter asked for in this page's life (the offline warm-up asks again for them). */
+export const requestedChapters = new Set<string>();
+
 export function loadChapter(id: string): Promise<CachedChapter> {
   const running = chapterInflight.get(id);
   if (running) return running;
+  requestedChapters.add(id);
   const p = fetchChapter(id)
     .then((res) => {
       const entry = { data: res.data, fromCache: res.fromCache };

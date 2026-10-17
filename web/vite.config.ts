@@ -46,6 +46,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       injectRegister: 'script', // registerSW.js file, no inline script (CSP script-src 'self')
       manifestFilename: 'manifest.webmanifest',
+      includeManifestIcons: false, // the icons are already in globPatterns (no duplicate precache entries)
       manifest: {
         id: '/',
         name: 'Atlas',
