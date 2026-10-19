@@ -72,3 +72,31 @@ export function initials(name: string): string {
   if (parts.length === 1) return Array.from(parts[0]).slice(0, 1).join('').toUpperCase();
   return (Array.from(parts[0])[0] + Array.from(parts[parts.length - 1])[0]).toUpperCase();
 }
+
+function hexRgb(hex: string): [number, number, number] | null {
+  const h = hex.replace(/^#/, '');
+  const full = h.length === 3 || h.length === 4 ? Array.from(h.slice(0, 3), (c) => c + c).join('') : h.slice(0, 6);
+  if (!/^[0-9a-f]{6}$/i.test(full)) return null;
+  return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16)) as [number, number, number];
+}
+
+const luminance = ([r, g, b]: [number, number, number]) => {
+  const lin = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+};
+
+/**
+ * An avatar's fill and initials colour from a person's colour: the colour a fifth darker (so white
+ * initials reach 4.5:1 on the usual colours, terracotta included), with dark initials on a colour
+ * that is still too light.
+ */
+export function avatarColors(color: string): { bg: string; ink: string } {
+  const rgb = hexRgb(color);
+  if (!rgb) return { bg: '#5e5d59', ink: '#fff' };
+  const dark = rgb.map((c) => Math.round(c * 0.8)) as [number, number, number];
+  const white = 1.05 / (luminance(dark) + 0.05);
+  return { bg: `rgb(${dark.join(', ')})`, ink: white >= 4.5 ? '#fff' : '#191918' };
+}

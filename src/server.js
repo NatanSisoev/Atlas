@@ -147,7 +147,9 @@ export async function createApp(cfg, tools, { log = console.log, fetchImpl } = {
     const t = await thumbs.get(file, type, w);
     const cache = url.searchParams.has('v') ? 'immutable' : 'revalidate';
     if (t.svg) return sendBuffer(req, res, t.svg, 'image/svg+xml', 'none', { 'Content-Security-Policy': 'sandbox' });
-    await sendFile(req, res, t.file, { mime: t.mime || mimeFor(t.file), cache: t.raw ? 'revalidate' : cache });
+    // No thumbnail could be made (no ImageMagick, or it failed): the source image itself goes out,
+    // full size and with its EXIF. Never let a cache keep it as if it were the thumbnail.
+    await sendFile(req, res, t.file, { mime: t.mime || mimeFor(t.file), cache: t.raw ? 'none' : cache });
   });
   route('GET', /^\/media\/local\/display\/(.+)$/, async (req, res, m) => {
     const { file } = await localFile(m[1], true);
@@ -184,7 +186,7 @@ export async function createApp(cfg, tools, { log = console.log, fetchImpl } = {
     }
     const t = await thumbs.get(u.file, kind, thumbWidth(url.searchParams.get('w')));
     if (t.svg) return sendBuffer(req, res, t.svg, 'image/svg+xml', 'none', { 'Content-Security-Policy': 'sandbox' });
-    await sendFile(req, res, t.file, { mime: t.raw ? u.mime : t.mime, cache: 'immutable' });
+    await sendFile(req, res, t.file, { mime: t.raw ? u.mime : t.mime, cache: t.raw ? 'none' : 'immutable' });
   });
   route('GET', /^\/media\/uploads\/([^/]+)$/, async (req, res, m, url) => {
     const u = uploads.locate(m[1]);

@@ -8,10 +8,11 @@ import http from 'node:http';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { makeWorkspace, makeStoryWorkspace, makeFakeWebDist, makePng, makePdf, withExifDate } from './fixtures.mjs';
+import { makeWorkspace, makeStoryWorkspace, makeFakeWebDist, makePng, makePdf, withExifDate, makePhoneClip, GOPRO_TAGS } from './fixtures.mjs';
 import { parseShareLink, imageHost, mapItem, pickPlayable } from '../src/gopro.js';
 import { decodeRelPath, hostAllowed, normalizePublicHost, checkFetchMetadata } from '../src/security.js';
-import { labelFor } from '../src/local.js';
+import { labelFor, metaFromExif, ffprobeMeta, createLocalIndex } from '../src/local.js';
+import { detectTools } from '../src/tools.js';
 import { parseImageInfo, exifDateToIso } from '../src/imageinfo.js';
 import { draftFolder, createStory, SCHEMA_VERSION } from '../src/story.js';
 import { DEFAULT_WEB_DIST } from '../src/config.js';
@@ -160,13 +161,14 @@ async function unitTests() {
     assert.deepEqual(d.items['l:day two/IMG_0003 é.jpg'].urls, {
       t400: `/media/local/thumb/day%20two/IMG_0003%20%C3%A9.jpg?w=400&v=${v}`,
       t1200: `/media/local/thumb/day%20two/IMG_0003%20%C3%A9.jpg?w=1200&v=${v}`,
+      t2400: `/media/local/thumb/day%20two/IMG_0003%20%C3%A9.jpg?w=2400&v=${v}`,
       display: '/media/local/display/day%20two/IMG_0003%20%C3%A9.jpg',
       original: '/media/local/original/day%20two/IMG_0003%20%C3%A9.jpg',
       download: '/media/local/original/day%20two/IMG_0003%20%C3%A9.jpg?download=1',
     });
     assert.deepEqual(d.items['l:VID.mp4'], {
       id: 'l:VID.mp4', kind: 'video', name: 'VID.mp4', label: 'VID', index: null, takenLocal: null, w: 4, h: 3, durationSec: 2, hasDisplay: false,
-      urls: { t400: `/media/local/thumb/VID.mp4?w=400&v=${v}`, t1200: `/media/local/thumb/VID.mp4?w=1200&v=${v}`, display: '/media/local/display/VID.mp4', original: '/media/local/original/VID.mp4', download: '/media/local/original/VID.mp4?download=1' },
+      urls: { t400: `/media/local/thumb/VID.mp4?w=400&v=${v}`, t1200: `/media/local/thumb/VID.mp4?w=1200&v=${v}`, t2400: `/media/local/thumb/VID.mp4?w=2400&v=${v}`, display: '/media/local/display/VID.mp4', original: '/media/local/original/VID.mp4', download: '/media/local/original/VID.mp4?download=1' },
     });
     const undated = draftFolder([li('a.jpg', null)], { title: 'x' }).chapter;
     assert.deepEqual([undated.status, undated.range, undated.from], ['someday', null, null]);
@@ -189,6 +191,72 @@ async function unitTests() {
     assert.equal(exifDateToIso('0000:00:00 00:00:00'), null);
     assert.deepEqual(parseImageInfo(makePng(40, 30, [1, 2, 3])), { width: 40, height: 30 });
   });
+  await test('video dates: QuickTime is UTC unless the clip is a GoPro (TZ Europe/Bucharest)', () =>
+    inZone('Europe/Bucharest', () => {
+      const at = (row, name, type = 'video') => metaFromExif(row, type, name).capturedAt;
+      const utc = '2025:08:12 02:30:00';
+      // A phone: UTC, shown in the laptop's local time (05:30 on the 12th, not 02:30 on the 11th's page).
+      assert.equal(at({ CreateDate: utc, MediaCreateDate: utc }, 'VID_20250812_053000.mp4'), '2025-08-12T05:30:00+03:00');
+      assert.equal(at({ CreateDate: '2025:01:10 22:30:00' }, 'v.mp4'), '2025-01-11T00:30:00+02:00');
+      // An iPhone's creation date carries its own offset: kept as written.
+      assert.equal(at({ CreateDate: utc, CreationDate: '2025:08:12 05:31:00+03:00', Make: 'Apple' }, 'IMG_0001.MOV'), '2025-08-12T05:31:00+03:00');
+      // A GoPro writes its local wall clock (ExifTool reports Model/FirmwareVersion/GoProType, no Make).
+      for (const row of [{ HandlerDescription: 'GoPro AVC' }, { Model: 'HERO11 Black' }, { FirmwareVersion: 'H22.01.01.10.00' }, { GoProType: 'FIRM' }, { Make: 'GoPro' }]) {
+        assert.equal(at({ CreateDate: utc, ...row }, 'clip.mp4'), '2025-08-12T02:30:00', JSON.stringify(row));
+      }
+      assert.equal(at({ CreateDate: utc }, 'GX010042.MP4'), '2025-08-12T02:30:00');
+      assert.equal(at({ CreateDate: utc }, '0013_GH010042.MP4'), '2025-08-12T02:30:00');
+      // EXIF DateTimeOriginal with its offset wins; a photo's CreateDate stays its wall clock; no date.
+      assert.equal(at({ DateTimeOriginal: '2025:08:12 07:00:00', OffsetTimeOriginal: '+03:00', CreateDate: utc }, 'v.mp4'), '2025-08-12T07:00:00+03:00');
+      assert.equal(at({ CreateDate: utc }, 'p.jpg', 'photo'), '2025-08-12T02:30:00');
+      assert.equal(at({ CreateDate: '0000:00:00 00:00:00' }, 'v.mp4'), null);
+      // The same rules on ffprobe's JSON (no exiftool).
+      const probe = (tags, streamTags = {}) => ({ format: { duration: '1.0', tags }, streams: [{ codec_type: 'video', width: 160, height: 90, tags: streamTags }] });
+      const ct = '2025-08-12T02:30:00.000000Z';
+      assert.equal(ffprobeMeta(probe({ creation_time: ct, 'com.android.version': '14' }), 'VID.mp4').capturedAt, '2025-08-12T05:30:00+03:00');
+      assert.equal(ffprobeMeta(probe({ creation_time: ct, 'com.apple.quicktime.creationdate': '2025-08-12T05:31:00+0300' }), 'IMG.MOV').capturedAt, '2025-08-12T05:31:00+03:00');
+      assert.equal(ffprobeMeta(probe({ creation_time: ct }, { handler_name: 'GoPro AVC' }), 'v.mp4').capturedAt, '2025-08-12T02:30:00');
+      assert.equal(ffprobeMeta(probe({ creation_time: ct, firmware: 'HD9.01.01.60.00' }), 'v.mp4').capturedAt, '2025-08-12T02:30:00');
+      assert.equal(ffprobeMeta(probe({ creation_time: ct }), 'GH010042.MP4').capturedAt, '2025-08-12T02:30:00');
+      assert.equal(ffprobeMeta(probe({ creation_time: '1904-01-01T00:00:00.000000Z' }), 'v.mp4').capturedAt, null);
+    }));
+  const tools = await detectTools();
+  if (!tools.ffmpeg) skip('video dates: real phone and GoPro clips through the index', 'no ffmpeg');
+  else await test('video dates: real phone and GoPro clips through the index', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-qt-'));
+    try {
+      const ws = path.join(root, 'ws');
+      const dataDir = path.join(ws, '.atlas');
+      fs.mkdirSync(path.join(dataDir, 'cache'), { recursive: true });
+      makePhoneClip(path.join(ws, 'android.mp4'), { utc: '2025-08-12T02:30:00Z' });
+      makePhoneClip(path.join(ws, 'iphone.mp4'), { utc: '2025-08-12T02:30:00Z', creationDate: '2025-08-12T05:31:00+0300' });
+      (await import('node:child_process')).execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=160x90:rate=10:duration=1',
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', ...GOPRO_TAGS, '-metadata', 'creation_time=2025-08-12T02:30:00Z', path.join(ws, 'gopro.mp4')]);
+      for (const use of [tools, { ...tools, exiftool: null }]) {
+        fs.rmSync(path.join(dataDir, 'cache', 'local-index.json'), { force: true });
+        const items = await inZone('Europe/Bucharest', () => createLocalIndex({ workspace: ws, dataDir, cache: path.join(dataDir, 'cache'), displayRoot: null }, use).list());
+        const by = Object.fromEntries(items.map((it) => [it.name, it.capturedAt]));
+        const via = use.exiftool ? 'exiftool' : 'ffprobe';
+        assert.equal(by['android.mp4'], '2025-08-12T05:30:00+03:00', via);
+        assert.equal(by['iphone.mp4'], '2025-08-12T05:31:00+03:00', via);
+        assert.equal(by['gopro.mp4'], '2025-08-12T02:30:00', via);
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+/** Run fn (sync or async) with process.env.TZ set, then restore it. */
+async function inZone(tz, fn) {
+  const before = process.env.TZ;
+  process.env.TZ = tz;
+  try {
+    return await fn();
+  } finally {
+    if (before === undefined) delete process.env.TZ;
+    else process.env.TZ = before;
+  }
 }
 
 // ---------------------------------------------------------------- integration
@@ -674,6 +742,11 @@ async function noTools(ws) {
       let r = await R('GET', '/media/local/thumb/0001_beach_day.jpg?w=200');
       assert.equal(r.status, 200);
       assert.match(r.headers['content-type'], /^image\/jpeg/);
+      // No thumbnail could be made, so the source file itself goes out: never cacheable, even
+      // under a versioned (otherwise immutable) URL.
+      r = await R('GET', '/media/local/thumb/0001_beach_day.jpg?w=400&v=1');
+      assert.equal(r.status, 200);
+      assert.equal(r.headers['cache-control'], 'no-store');
       if (items.some((i) => i.type === 'video')) {
         r = await R('GET', '/media/local/thumb/0002_waves.mp4');
         assert.equal(r.status, 200);
@@ -751,7 +824,7 @@ async function storyIntegration(story, dist) {
       for (const [id, it] of Object.entries(items)) {
         assert.deepEqual(Object.keys(it), ['id', 'kind', 'name', 'label', 'index', 'takenLocal', 'w', 'h', 'durationSec', 'hasDisplay', 'urls'], id);
         assert.equal(it.id, id);
-        assert.deepEqual(Object.keys(it.urls), ['t400', 't1200', 'display', 'original', 'download'], id);
+        assert.deepEqual(Object.keys(it.urls), ['t400', 't1200', 't2400', 'display', 'original', 'download'], id);
       }
       const a = items['l:0001_arrival.jpg'];
       assert.deepEqual([a.kind, a.name, a.label, a.index, a.takenLocal, a.hasDisplay], ['photo', '0001_arrival.jpg', 'arrival', 1, '2025-08-10T18:30:00+03:00', false]);
@@ -760,6 +833,7 @@ async function storyIntegration(story, dist) {
       assert.deepEqual(a.urls, {
         t400: `/media/local/thumb/0001_arrival.jpg?w=400&v=${v}`,
         t1200: `/media/local/thumb/0001_arrival.jpg?w=1200&v=${v}`,
+        t2400: `/media/local/thumb/0001_arrival.jpg?w=2400&v=${v}`,
         display: '/media/local/display/0001_arrival.jpg',
         original: '/media/local/original/0001_arrival.jpg',
         download: '/media/local/original/0001_arrival.jpg?download=1',

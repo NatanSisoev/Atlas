@@ -6,7 +6,8 @@
   import Play from './components/Play.svelte';
   import SettingsSheet from './components/SettingsSheet.svelte';
   import { coverPath, hooks, navigate, parse, router, type Route } from './lib/router.svelte';
-  import { loadAtlas, vt } from './lib/store.svelte';
+  import { loadAtlas, retryWhileStale, store, vt } from './lib/store.svelte';
+  import { reloadIfPending } from './lib/updates';
   import { motion } from './lib/viewport.svelte';
 
   // Name the elements that morph during the next route change; clear them when it is done.
@@ -60,7 +61,18 @@
     };
   });
 
+  // While the Cover shows a saved copy, keep trying quietly.
+  $effect(() => {
+    if (!store.atlasFromCache) return;
+    return retryWhileStale(() => loadAtlas());
+  });
+
   const route = $derived(router.route);
+
+  // A new version that activated while the viewer or Play was open: reload once back on a calm screen.
+  $effect(() => {
+    if (route.name === 'cover' || route.name === 'chapter') reloadIfPending();
+  });
   const storyId = $derived(route.name === 'chapter' || route.name === 'viewer' || route.name === 'play' ? route.id : null);
 </script>
 

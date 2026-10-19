@@ -27,6 +27,8 @@
   const PLATE_MS = 2500;
   const PHOTO_MS = 5000;
   const FADE_MS = 900;
+  /** Under reduced motion: a short crossfade, no drift. */
+  const QUICK_FADE_MS = 240;
 
   const initial = () => cachedChapter(id)?.data ?? null;
   let data = $state<ChapterData | null>(initial());
@@ -48,6 +50,8 @@
   });
 
   let i = $state(0);
+  /** A fresh slide block for every show(): a returning index must not resume the outgoing one. */
+  let shown = $state(0);
   let paused = $state(false);
   let chrome = $state(true);
   let videoFailed = $state(false);
@@ -59,6 +63,8 @@
   let timer: ReturnType<typeof setTimeout> | null = null;
   let remaining = 0;
   let startedAt = 0;
+  /** A timed advance is pending for the current slide (also while paused, or after a video failed). */
+  let armed = false;
 
   function durationOf(s: Slide | null): number | null {
     if (!s) return null;
@@ -75,6 +81,7 @@
 
   function arm(ms: number) {
     clearTimer();
+    armed = true;
     remaining = ms;
     startedAt = performance.now();
     if (!paused) timer = setTimeout(next, ms);
@@ -89,12 +96,26 @@
   }
 
   function show(n: number) {
+    // The outgoing clip must not keep playing (with sound), or end and step again, while it fades.
+    videoEl?.pause();
+    shown++;
     i = Math.max(0, Math.min(slides.length - 1, n));
     videoFailed = false;
+    // The end card cannot be paused: never land on it (or leave it) with a stale "Paused".
+    if (slides[i]?.kind === 'end') paused = false;
     const d = durationOf(slides[i]);
     if (d) arm(d);
-    else clearTimer();
+    else {
+      clearTimer();
+      armed = false;
+    }
     preload(i + 1);
+  }
+
+  function replay() {
+    paused = false;
+    show(0);
+    nudgeChrome();
   }
 
   function togglePause() {
@@ -108,7 +129,7 @@
       videoEl?.pause();
       chrome = true;
     } else {
-      if (durationOf(slide)) {
+      if (armed) {
         startedAt = performance.now();
         timer = setTimeout(next, Math.max(400, remaining));
       }
@@ -235,6 +256,26 @@
   });
 
   const origins = ['50% 50%', '30% 35%', '70% 60%', '40% 70%', '65% 30%'];
+
+  // ---- slide change: the incoming slide fades in on top of the outgoing one, which stays fully
+  // there until it is covered (no dip to black, no double exposure of two half-faded photos) ----
+  const fadeMs = $derived(motion.reduced ? QUICK_FADE_MS : FADE_MS);
+  function hold(node: Element, { duration }: { duration: number }) {
+    node.classList.add('leaving');
+    return { duration };
+  }
+
+  // Captions live outside the slides: the old one is gone before the new one appears.
+  const captionText = $derived(
+    slide?.kind === 'photo' || slide?.kind === 'video'
+      ? slide.kind === 'video' && videoFailed
+        ? 'This video can’t play in this browser.'
+        : slide.item.caption
+      : '',
+  );
+  const captionKey = $derived(`${shown}:${videoFailed ? 1 : 0}`);
+  const captionIn = $derived(motion.reduced ? { duration: 150, delay: 120 } : { duration: 300, delay: 450 });
+  const captionOut = $derived({ duration: motion.reduced ? 100 : 150 });
 </script>
 
 <svelte:window {onkeydown} />
@@ -254,8 +295,8 @@
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="stage" onclick={onStageClick}>
     {#if slide && data}
-      {#key i}
-        <div class="slide" transition:fade={{ duration: FADE_MS }}>
+      {#key shown}
+        <div class="slide" in:fade={{ duration: fadeMs }} out:hold={{ duration: fadeMs }}>
           {#if slide.kind === 'title'}
             <div class="card">
               {#if data.chapter.range}<p class="kicker">{data.chapter.range}</p>{/if}
@@ -271,13 +312,11 @@
             <div class="photo" style:transform-origin={origins[i % origins.length]} style:--hold="{PHOTO_MS + FADE_MS}ms">
               <ProgressiveImg srcs={[slide.item.urls.t1200, slide.item.urls.display]} alt={slide.item.caption} />
             </div>
-            {#if slide.item.caption}<p class="caption">{slide.item.caption}</p>{/if}
           {:else if slide.kind === 'video'}
             {#if videoFailed}
               <div class="photo still-frame">
                 <ProgressiveImg srcs={[slide.item.urls.t1200]} alt={slide.item.caption} />
               </div>
-              <p class="caption">This video can’t play in this browser.</p>
             {:else}
               <!-- svelte-ignore a11y_media_has_caption (home videos have no caption tracks) -->
               <video
@@ -286,22 +325,31 @@
                 poster={slide.item.urls.t1200}
                 playsinline
                 preload="auto"
-                onended={next}
-                onerror={onVideoError}
+                onended={(e) => {
+                  // Only the current slide's clip (an outgoing one may still be in the DOM).
+                  if (e.currentTarget === videoEl && slide?.kind === 'video') next();
+                }}
+                onerror={(e) => {
+                  if (e.currentTarget === videoEl && slide?.kind === 'video') onVideoError();
+                }}
               ></video>
-              {#if slide.item.caption}<p class="caption">{slide.item.caption}</p>{/if}
             {/if}
           {:else}
             <div class="card">
               <p class="kicker">The end</p>
               <h2 class="card-title">{data.chapter.title}</h2>
               <div class="end-actions">
-                <button class="text-btn solid" onclick={() => show(0)}><Icon name="replay" size={18} /> Play again</button>
+                <button class="text-btn solid" onclick={replay}><Icon name="replay" size={18} /> Play again</button>
                 <button class="text-btn" onclick={exit}>Back to the chapter</button>
               </div>
             </div>
           {/if}
         </div>
+      {/key}
+      {#key captionKey}
+        {#if captionText}
+          <p class="caption" in:fade|global={captionIn} out:fade|global={captionOut}>{captionText}</p>
+        {/if}
       {/key}
     {:else if error}
       <div class="card">
@@ -315,17 +363,20 @@
     <button class="icon-btn" onclick={exit} aria-label="Stop playing"><Icon name="close" /></button>
     {#if photoCount && (slide?.kind === 'photo' || slide?.kind === 'video')}<p class="count">{position} / {photoCount}</p>{/if}
   </div>
-  <div class="controls">
-    <button class="icon-btn" onclick={() => (prev(), nudgeChrome())} aria-label="Previous" disabled={i === 0}>
-      <Icon name="prev" size={26} />
-    </button>
-    <button class="icon-btn big" onclick={togglePause} aria-label={paused ? 'Resume' : 'Pause'}>
-      <Icon name={paused ? 'play' : 'pause'} size={22} stroke={0} filled />
-    </button>
-    <button class="icon-btn" onclick={() => (next(), nudgeChrome())} aria-label="Next" disabled={i >= slides.length - 1}>
-      <Icon name="next" size={26} />
-    </button>
-  </div>
+  <!-- The end card has its own "Play again" and "Back to the chapter"; nothing to pause there. -->
+  {#if slide?.kind !== 'end'}
+    <div class="controls">
+      <button class="icon-btn" onclick={() => (prev(), nudgeChrome())} aria-label="Previous" disabled={i === 0}>
+        <Icon name="prev" size={26} />
+      </button>
+      <button class="icon-btn big" onclick={togglePause} aria-label={paused ? 'Resume' : 'Pause'}>
+        <Icon name={paused ? 'play' : 'pause'} size={22} stroke={0} filled />
+      </button>
+      <button class="icon-btn" onclick={() => (next(), nudgeChrome())} aria-label="Next" disabled={i >= slides.length - 1}>
+        <Icon name="next" size={26} />
+      </button>
+    </div>
+  {/if}
   <p class="sr-only" aria-live="polite">{paused ? 'Paused' : ''}</p>
 </div>
 
@@ -358,12 +409,20 @@
     overflow: hidden;
   }
 
+  /* Opaque: the incoming slide covers the outgoing one as it fades in (its letterbox and the cards
+     included), and the outgoing one stays underneath until it is covered. */
   .slide {
     position: absolute;
+    z-index: 1;
     inset: 0;
     display: grid;
     grid-template: minmax(0, 1fr) / minmax(0, 1fr);
     place-items: center;
+    background: #000;
+  }
+
+  .slide:global(.leaving) {
+    z-index: 0;
   }
 
   .photo {
@@ -402,6 +461,7 @@
 
   .caption {
     position: absolute;
+    z-index: 2;
     left: 50%;
     bottom: calc(var(--safe-bottom) + 28px);
     transform: translateX(-50%);

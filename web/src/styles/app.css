@@ -107,8 +107,10 @@ html.locked body {
   overflow: hidden;
 }
 
-/* The viewer and Play are black; so is the reserved scrollbar gutter beside them. */
+/* The viewer and Play cover the page: no reserved scrollbar gutter while they are open, so their
+   fixed inset: 0 overlays span the full width with classic scrollbars too (Windows, fullscreen). */
 html.locked {
+  scrollbar-gutter: auto;
   background: #000;
 }
 

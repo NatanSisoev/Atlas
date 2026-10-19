@@ -7,10 +7,11 @@ import { clamp } from './util.js';
 
 const BROWSER_IMAGES = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif']);
 
-export const THUMB_WIDTHS = [128, 200, 400, 800, 1200];
+// 2400 is for the largest images of the book (a chapter's cover, full-width rows) on 2x/3x screens.
+export const THUMB_WIDTHS = [128, 200, 400, 800, 1200, 2400];
 
 /** Snap a requested width up to a fixed step (bounded cache); lo/hi clamp first. */
-export function thumbWidth(raw, lo = 64, hi = 1200, dflt = 400, steps = THUMB_WIDTHS) {
+export function thumbWidth(raw, lo = 64, hi = 2400, dflt = 400, steps = THUMB_WIDTHS) {
   const n = Number(raw);
   const w = !Number.isFinite(n) || n <= 0 ? dflt : clamp(n, lo, hi);
   return steps ? steps.find((s) => s >= w) || steps.at(-1) : Math.round(w);

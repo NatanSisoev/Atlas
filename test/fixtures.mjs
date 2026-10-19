@@ -70,6 +70,20 @@ export function makePdf(text = 'Boarding pass') {
   return Buffer.from(out, 'latin1');
 }
 
+/** ffmpeg arguments that make a clip look like a GoPro's (the handler name real GoPro files carry). */
+export const GOPRO_TAGS = ['-metadata:s:v:0', 'handler_name=GoPro AVC'];
+
+/**
+ * A phone-style clip (only with ffmpeg): QuickTime dates in UTC, as Android writes them, or with
+ * an iPhone-style creation date that carries its offset.
+ */
+export function makePhoneClip(file, { utc, creationDate } = {}) {
+  const args = ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=160x90:rate=10:duration=1',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-metadata', `creation_time=${utc}`, '-metadata', 'com.android.version=14'];
+  if (creationDate) args.push('-metadata', `com.apple.quicktime.creationdate=${creationDate}`);
+  execFileSync('ffmpeg', [...args, '-movflags', 'use_metadata_tags', file]);
+}
+
 function has(cmd, args) {
   try { execFileSync(cmd, args, { stdio: 'ignore', timeout: 10_000 }); return true; } catch { return false; }
 }
@@ -106,8 +120,9 @@ export function makeWorkspace(root) {
     execFileSync('exiftool', ['-overwrite_original', '-q', '-DateTimeOriginal=2025:08:12 15:00:19', '-OffsetTimeOriginal=+03:00', photo]);
   }
   if (tools.ffmpeg) {
+    // A GoPro clip (its handler name says so): its QuickTime date is the camera's local wall clock.
     execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=15:duration=2',
-      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-metadata', 'creation_time=2025-08-13T10:20:30Z', path.join(ws, '0002_waves.mp4')]);
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', ...GOPRO_TAGS, '-metadata', 'creation_time=2025-08-13T10:20:30Z', path.join(ws, '0002_waves.mp4')]);
   }
   fs.writeFileSync(path.join(ws, 'day two', '0003_sunset_é.png'), makePng(40, 30, [200, 80, 40]));
   fs.writeFileSync(path.join(ws, '.hidden', '0009_skip.jpg'), TINY_JPEG);
@@ -189,7 +204,7 @@ export function makeStoryWorkspace(root) {
   if (exifArgs.length) execFileSync('exiftool', [...exifArgs, '-common_args', '-overwrite_original', '-q']);
   if (tools.ffmpeg) {
     execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=15:duration=1.5',
-      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-metadata', 'creation_time=2025-08-11T16:00:00Z', path.join(ws, '0006_waves.mp4')]);
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', ...GOPRO_TAGS, '-metadata', 'creation_time=2025-08-11T16:00:00Z', path.join(ws, '0006_waves.mp4')]);
   }
   const video = tools.ffmpeg ? ['0006_waves.mp4'] : [];
   const expected = {
@@ -310,13 +325,13 @@ export function makeBookWorkspace(root, { name = 'Black Sea, August' } = {}) {
   if (exifArgs.length) execFileSync('exiftool', [...exifArgs, '-common_args', '-overwrite_original', '-q']);
   const videos = [];
   if (tools.ffmpeg) {
-    // QuickTime dates are naive local time (as GoPro writes them).
+    // GoPro clips: their QuickTime dates are the camera's local wall clock (phones write UTC).
     for (const [file, when, src] of [
       ['0010_waves.mp4', '2025-08-13T11:20:00Z', 'testsrc2=size=640x360:rate=25:duration=3'],
       ['0018_cicadas.mp4', '2025-08-14T16:00:00Z', 'testsrc2=size=360x640:rate=25:duration=2'],
     ]) {
       execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', src,
-        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-metadata', `creation_time=${when}`, path.join(ws, file)]);
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', ...GOPRO_TAGS, '-metadata', `creation_time=${when}`, path.join(ws, file)]);
       videos.push(file);
     }
     fs.copyFileSync(path.join(ws, '0010_waves.mp4'), path.join(ws, 'compressed', '0010_waves.mp4'));

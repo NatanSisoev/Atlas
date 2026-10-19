@@ -4,7 +4,9 @@
 import { localDay, wallKey, chapterStatus, todayYmd } from './time.js';
 
 /**
- * @typedef {{ id: string, name: string, index: number | null, takenLocal: string | null, kind: 'photo' | 'video' }} DraftItem
+ * `dir` is the item's folder inside the source ('' at its root, "day 2" or "2025 Black Sea/day 2"
+ * below it); optional, only Curated order uses it.
+ * @typedef {{ id: string, name: string, index: number | null, takenLocal: string | null, kind: 'photo' | 'video', dir?: string }} DraftItem
  * @typedef {{ id: string, date: string | null, items: string[] }} DraftPage
  * @typedef {{ id: string, title: string, from: string | null, to: string | null,
  *   status: 'upcoming' | 'ongoing' | 'past' | 'someday', coverId: string | null,
@@ -28,18 +30,25 @@ export function isCuratedNames(names) {
 const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 const byName = (/** @type {DraftItem} */ a, /** @type {DraftItem} */ b) =>
   collator.compare(a.name, b.name) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+/** Folders: root ('') first, then numeric-aware ("day 2" before "day 10"). @param {string} a @param {string} b */
+const byDir = (a, b) => (a === b ? 0 : a === '' ? -1 : b === '' ? 1 : collator.compare(a, b) || (a < b ? -1 : 1));
 /** Ascending with nulls last. @param {any} a @param {any} b */
 const nullsLast = (a, b) => (a === b ? 0 : a == null ? 1 : b == null ? -1 : a < b ? -1 : 1);
 
 /**
- * Story order: Curated folders read in filename order (index, name), others by time (undated last).
+ * Story order: Curated folders read in filename order, folder by folder (dir, index, name; files at
+ * the root first, numbered subfolders that each restart at 0001 never interleave); others by time
+ * (undated last).
  * @param {DraftItem[]} items
  * @param {boolean} curated
  * @returns {DraftItem[]}
  */
 export function storyOrder(items, curated) {
   const keyed = items.map((it) => ({ it, key: curated ? (Number.isFinite(it.index) ? it.index : null) : wallKey(it.takenLocal) }));
-  keyed.sort((a, b) => nullsLast(a.key, b.key) || byName(a.it, b.it));
+  keyed.sort(
+    (a, b) =>
+      (curated ? byDir(a.it.dir || '', b.it.dir || '') : 0) || nullsLast(a.key, b.key) || byName(a.it, b.it),
+  );
   return keyed.map((k) => k.it);
 }
 

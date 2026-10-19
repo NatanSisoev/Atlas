@@ -1,6 +1,8 @@
 // Read-only API client. Same-origin GETs only; the server needs no custom header for reads.
 // When the network fails, the service worker answers /api/* from its cache and marks the
-// response with `X-Atlas-Cache: fallback`, which the UI shows as a quiet offline line.
+// response with `X-Atlas-Cache: fallback` (or `slow`, when the laptop is only slow to answer),
+// which the UI shows as a quiet line.
+import { safeMediaPath } from '$model/urls.js';
 import type { AtlasIndex, ChapterData, ChapterSummary, Item, ItemUrls, Page, Person } from './types';
 
 export class ApiError extends Error {
@@ -13,7 +15,10 @@ export class ApiError extends Error {
 
 export interface Loaded<T> {
   data: T;
+  /** A saved copy answered instead of the network. */
   fromCache: boolean;
+  /** ...because the laptop was slow to answer, not unreachable (a fresh copy may still arrive). */
+  slow: boolean;
 }
 
 async function getJson(path: string, signal?: AbortSignal): Promise<Loaded<unknown>> {
@@ -34,7 +39,8 @@ async function getJson(path: string, signal?: AbortSignal): Promise<Loaded<unkno
     }
     throw new ApiError(res.status, message);
   }
-  return { data: await res.json(), fromCache: res.headers.get('x-atlas-cache') === 'fallback' };
+  const mark = res.headers.get('x-atlas-cache');
+  return { data: await res.json(), fromCache: mark === 'fallback' || mark === 'slow', slow: mark === 'slow' };
 }
 
 // ---- light normalisation: the shapes are fixed by contract, but never crash on a bad field ----
@@ -45,9 +51,9 @@ const num = (v: unknown, d = 0): number => (typeof v === 'number' && Number.isFi
 const numOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {});
 
-/** Only same-origin absolute paths ("/media/…"); anything else becomes empty. */
+/** Only same-origin "/media/…" paths; anything else becomes empty (see model/urls.js). */
 export function safePath(v: unknown): string {
-  return typeof v === 'string' && /^\/(?![/\\])/.test(v) ? v : '';
+  return safeMediaPath(v);
 }
 
 /**
@@ -71,6 +77,7 @@ function normItem(raw: unknown): Item | null {
   const urls: ItemUrls = {
     t400: safePath(u.t400),
     t1200: safePath(u.t1200),
+    t2400: safePath(u.t2400),
     display: safePath(u.display),
     original: safePath(u.original),
     download: safePath(u.download),
@@ -112,7 +119,7 @@ function normChapter(raw: unknown): ChapterSummary | null {
   };
 }
 
-function normAtlas(raw: unknown): AtlasIndex {
+export function normAtlas(raw: unknown): AtlasIndex {
   const r = obj(raw);
   const people: Person[] = (Array.isArray(r.people) ? r.people : [])
     .map((p) => obj(p))
@@ -122,7 +129,7 @@ function normAtlas(raw: unknown): AtlasIndex {
   return { schemaVersion: num(r.schemaVersion, 1), title: str(r.title), people, chapters };
 }
 
-function normChapterData(raw: unknown): ChapterData {
+export function normChapterData(raw: unknown): ChapterData {
   const r = obj(raw);
   const chapter = normChapter(r.chapter);
   if (!chapter) throw new ApiError(500, 'bad chapter');
@@ -148,10 +155,12 @@ function normChapterData(raw: unknown): ChapterData {
 
 export async function fetchAtlas(signal?: AbortSignal): Promise<Loaded<AtlasIndex>> {
   const res = await getJson('/api/atlas', signal);
-  return { data: normAtlas(res.data), fromCache: res.fromCache };
+  return { ...res, data: normAtlas(res.data) };
 }
 
+export const chapterApiPath = (id: string) => `/api/chapters/${encodeURIComponent(id)}`;
+
 export async function fetchChapter(id: string, signal?: AbortSignal): Promise<Loaded<ChapterData>> {
-  const res = await getJson(`/api/chapters/${encodeURIComponent(id)}`, signal);
-  return { data: normChapterData(res.data), fromCache: res.fromCache };
+  const res = await getJson(chapterApiPath(id), signal);
+  return { ...res, data: normChapterData(res.data) };
 }

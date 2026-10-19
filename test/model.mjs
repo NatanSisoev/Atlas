@@ -1,7 +1,8 @@
-// node test/model.mjs — unit tests for the shared model (model/time.js, model/view.js).
+// node test/model.mjs — unit tests for the shared model (model/time.js, model/view.js, model/urls.js).
 import assert from 'node:assert/strict';
 import { DAY_START_HOUR, localDay, todayYmd, formatPlate, formatRange, chapterStatus, formatTime } from '../model/time.js';
 import { isCuratedNames, draftFolderChapter } from '../model/view.js';
+import { safeMediaPath } from '../model/urls.js';
 
 const results = [];
 function test(name, fn) {
@@ -186,6 +187,41 @@ test('draftFolderChapter: non-curated folders read by time (wall clock), undated
   assert.equal(chapter.coverId, 'l:IMG_1.jpg');
   assert.equal(chapter.itemCount, 6);
   assert.equal(chapter.pageCount, 2);
+});
+
+test('draftFolderChapter: curated numbered subfolders read folder by folder, never interleaved', () => {
+  const sub = (dir, name, takenLocal) => ({ ...item(name, takenLocal), id: `l:${dir}/${name}`, dir });
+  const items = [
+    sub('2025 Black Sea', '0001_c.jpg', '2025-08-12T10:00:00'),
+    sub('2024 Portugal', '0002_b.jpg', '2024-06-03T10:00:00'),
+    sub('2025 Black Sea', '0002_d.jpg', '2025-08-13T10:00:00'),
+    sub('2024 Portugal', '0001_a.jpg', '2024-06-01T10:00:00'),
+  ];
+  const { chapter, pages } = draftFolderChapter({ id: 'folder', title: 'Trips', items, curated: true, today: '2026-01-01' });
+  assert.deepEqual(pages.map((p) => p.items.map((id) => id.slice(2))), [
+    ['2024 Portugal/0001_a.jpg'],
+    ['2024 Portugal/0002_b.jpg'],
+    ['2025 Black Sea/0001_c.jpg'],
+    ['2025 Black Sea/0002_d.jpg'],
+  ]);
+  assert.deepEqual([chapter.from, chapter.to], ['2024-06-01', '2025-08-13']);
+  // Folder names compare numerically ("day 2" before "day 10"); files at the root come first.
+  const days = [sub('day 10', '0001_x.jpg', null), sub('day 2', '0001_y.jpg', null), { ...item('0005_root.jpg', null), dir: '' }];
+  const order = draftFolderChapter({ id: 'f', title: '', items: days, curated: true, today: '2026-01-01' }).pages.flatMap((p) => p.items);
+  assert.deepEqual(order, ['l:0005_root.jpg', 'l:day 2/0001_y.jpg', 'l:day 10/0001_x.jpg']);
+});
+
+test('safeMediaPath: only same-origin /media/ paths pass', () => {
+  const origin = 'https://atlas.tailnet.ts.net';
+  for (const bad of [
+    '/\t/evil.example/x', '/\n/evil.example/x', '/\r/evil.example/x', '/\t/evil.example/x.jpg', '//evil.example/x', '/\\evil.example/x',
+    'https://evil.example/x', 'javascript:alert(1)', '/api/x', '/media/../api/x', 'media/local/x', '', null, 42, '/media/local/x\u0000',
+  ]) {
+    assert.equal(safeMediaPath(bad, origin), '', JSON.stringify(bad));
+  }
+  assert.equal(safeMediaPath('/media/local/thumb/a%20b.jpg?w=400&v=1', origin), '/media/local/thumb/a%20b.jpg?w=400&v=1');
+  assert.equal(safeMediaPath('/media/local/original/day%20two/0003_sunset_%C3%A9.png?download=1', origin), '/media/local/original/day%20two/0003_sunset_%C3%A9.png?download=1');
+  assert.equal(safeMediaPath('/media/local/display/x.mp4'), '/media/local/display/x.mp4', 'works without a page origin');
 });
 
 const failed = results.filter((ok) => !ok).length;

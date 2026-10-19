@@ -1,8 +1,10 @@
-// node test/e2e.mjs [--shots <dir>] — the book (M1) end to end in headless Chromium.
+// node test/e2e.mjs [--shots <dir>] [--only <text>] — the book (M1) end to end in headless Chromium.
 // Generates a curated trip (test/fixtures.mjs makeBookWorkspace), starts `atlas serve` on it with
 // the built web/dist, and reads it on an Android-sized phone and a desktop, light and dark:
 // Cover → Story (plates, justified rows, captions, lazy images) → Viewer (swipe/keys, details) →
-// Play → Settings (title style) → the old board at /board/, then offline from the service worker.
+// Play → Settings (title style) → the old board at /board/. Then the service worker: offline after
+// one visit (Story, Viewer, Play), a proxy answering 502 (Tailscale Serve with Atlas stopped), a
+// slow laptop, a new deploy, and no ImageMagick (originals never cached as thumbnails).
 // Also checks Fetch Metadata, CSP and CORP. Optional: prints SKIP and exits 0 when Playwright or
 // its Chromium is not installed (Playwright never downloads browsers on npm install).
 import fs from 'node:fs';
@@ -16,9 +18,12 @@ import { fileURLToPath } from 'node:url';
 import { makeBookWorkspace } from './fixtures.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DIST = path.join(ROOT, 'web', 'dist');
+// ATLAS_E2E_DIST: read another build of the client (e.g. an older one, to see a test fail).
+const DIST = process.env.ATLAS_E2E_DIST ? path.resolve(process.env.ATLAS_E2E_DIST) : path.join(ROOT, 'web', 'dist');
 const argv = process.argv.slice(2);
 const shotsDir = argv.includes('--shots') ? path.resolve(argv[argv.indexOf('--shots') + 1] || 'shots') : null;
+/** Run only the tests whose name contains this text (the security check always runs). */
+const only = argv.includes('--only') ? argv[argv.indexOf('--only') + 1] || '' : '';
 
 let chromium;
 try {
@@ -42,6 +47,7 @@ try {
 // ---------------------------------------------------------------- harness
 const results = [];
 async function test(name, fn) {
+  if (only && !name.includes(only) && !name.startsWith('security')) return;
   const t0 = Date.now();
   try {
     await fn();
@@ -73,9 +79,9 @@ function request(port, p, headers = {}) {
   });
 }
 
-async function startServer(ws) {
+async function startServer(ws, extraEnv = {}) {
   const port = await freePort();
-  const env = { ...process.env, ATLAS_WEB_DIST: DIST, ATLAS_PUBLIC_HOST: '' };
+  const env = { ...process.env, ATLAS_WEB_DIST: DIST, ATLAS_PUBLIC_HOST: '', ...extraEnv };
   const child = spawn(process.execPath, [path.join(ROOT, 'bin', 'atlas.js'), 'serve', ws, '--port', String(port)], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   child.stdout.on('data', (d) => (log += d));
@@ -99,6 +105,99 @@ async function startServer(ws) {
       }),
   };
 }
+
+/**
+ * A reverse proxy in front of a server, the way `tailscale serve` sits in front of Atlas: it
+ * answers 502 when the server is down. `delay(re, ms)` holds the next request matching `re`
+ * (once per distinct path); `upstream` can be switched (a deploy); `close()` takes it away.
+ */
+async function startProxy(upstreamPort) {
+  const port = await freePort();
+  const delays = [];
+  const log = [];
+  const proxy = {
+    port,
+    base: `http://127.0.0.1:${port}`,
+    upstream: upstreamPort,
+    log,
+    /** Requests seen for exactly this path (query ignored). */
+    count: (p) => log.filter((u) => u.split('?')[0] === p).length,
+    delay: (re, ms) => delays.push({ re, ms, seen: new Set() }),
+    close: () => new Promise((r) => { server.closeAllConnections(); server.close(() => r()); }),
+  };
+  const server = http.createServer((req, res) => {
+    log.push(req.url);
+    const pathOnly = req.url.split('?')[0];
+    let wait = 0;
+    for (const d of delays) {
+      if (d.re.test(pathOnly) && !d.seen.has(pathOnly)) {
+        d.seen.add(pathOnly);
+        wait = Math.max(wait, d.ms);
+      }
+    }
+    setTimeout(() => {
+      const up = http.request({ host: '127.0.0.1', port: proxy.upstream, method: req.method, path: req.url, headers: req.headers, agent: false }, (r) => {
+        res.writeHead(r.statusCode, r.headers);
+        r.pipe(res);
+      });
+      up.on('error', () => {
+        if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain' });
+        res.end('Bad Gateway');
+      });
+      req.pipe(up);
+    }, wait);
+  });
+  await new Promise((r) => server.listen(port, '127.0.0.1', r));
+  return proxy;
+}
+
+/** A copy of the generated workspace for a test that changes it or needs its own server. */
+function copyWorkspace(ws, name) {
+  const dest = path.join(tmpRoot, name);
+  fs.cpSync(ws, dest, { recursive: true, preserveTimestamps: true });
+  return dest;
+}
+
+/** Evaluate `fn` in the page until it returns true (it may return a diagnostic value meanwhile). */
+async function poll(page, fn, arg, { timeout = 15000, what = 'a condition' } = {}) {
+  const until = Date.now() + timeout;
+  let last;
+  for (;;) {
+    last = await page.evaluate(fn, arg);
+    if (last === true) return;
+    if (Date.now() > until) throw new Error(`timed out waiting for ${what}: ${JSON.stringify(last)}`);
+    await page.waitForTimeout(200);
+  }
+}
+
+const THUMB_CACHE = 'atlas-thumbs-v2';
+const API_CACHE = 'atlas-api-v1';
+
+/** Both book JSON documents are in the worker's cache. */
+const apiCached = (page) =>
+  poll(
+    page,
+    async (name) => {
+      const api = await caches.open(name);
+      return !!(await api.match('/api/chapters/folder')) && !!(await api.match('/api/atlas'));
+    },
+    API_CACHE,
+    { what: 'the book JSON in the worker cache' },
+  );
+
+/** The visible slide of the viewer shows its picture (a video: plays, or its still behind the note). */
+const viewerSlideShown = (page) =>
+  page.waitForFunction(
+    () => {
+      const s = document.querySelector('.viewer .slide:not([aria-hidden="true"])');
+      const v = s?.querySelector('video');
+      if (v) return v.readyState >= 1;
+      const img = s?.querySelector('img');
+      return !!img && img.complete && img.naturalWidth > 0;
+    },
+    null,
+    { timeout: 6000 },
+  );
 
 const DEVICES = {
   phone: { viewport: { width: 412, height: 915 }, deviceScaleFactor: 2.625, isMobile: true, hasTouch: true },
@@ -264,7 +363,7 @@ async function readThrough(srv, book, device, scheme) {
       [...document.querySelectorAll('.rows')].map((rowsEl) => ({
         width: rowsEl.getBoundingClientRect().width,
         rows: [...rowsEl.querySelectorAll('.row')].map((row) => ({
-          centered: row.classList.contains('centered'),
+          short: row.classList.contains('short'),
           used: row.scrollWidth,
           tiles: [...row.querySelectorAll('.frame')].map((f) => {
             const r = f.getBoundingClientRect();
@@ -276,7 +375,7 @@ async function readThrough(srv, book, device, scheme) {
     for (const pg of rows) {
       assert.ok(pg.width <= W, `rows wider than the screen (${pg.width})`);
       for (const r of pg.rows) {
-        if (!r.centered) assert.ok(Math.abs(r.used - pg.width) <= 2, `row ${r.used} ≠ ${pg.width}`);
+        if (!r.short) assert.ok(Math.abs(r.used - pg.width) <= 2, `row ${r.used} ≠ ${pg.width}`);
         else assert.ok(r.used <= pg.width + 1);
       }
     }
@@ -436,36 +535,114 @@ async function readThrough(srv, book, device, scheme) {
   }
 }
 
-async function offline(srv) {
-  const { context, page, problems } = await newPage(srv.base, 'phone', 'light');
+async function offline(book) {
+  // Its own server, behind a proxy that holds /sw.js back: the first screen loads from the network
+  // before the worker controls the page, so only the warm-up can put it in the worker's caches.
+  const ws = copyWorkspace(book.ws, 'offline');
+  const srv = await startServer(ws);
+  const proxy = await startProxy(srv.port);
+  const { context, page, problems } = await newPage(proxy.base, 'phone', 'light');
   try {
-    // One visit, never reloaded online: the worker installs and takes over during it, and the page
-    // asks again (through the worker) for the book's JSON and the thumbnails it already shows.
+    proxy.delay(/^\/sw\.js$/, 3000);
     await page.goto('/c/folder');
     await page.locator('section.page').first().waitFor();
-    await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 15000 });
-    await page.waitForFunction(
-      async () => {
-        const api = await caches.open('atlas-api-v1');
-        const thumbs = await caches.open('atlas-thumbs-v1');
-        return !!(await api.match('/api/chapters/folder')) && !!(await api.match('/api/atlas')) && (await thumbs.keys()).length > 0;
+    await imagesInViewLoaded(page);
+    assert.equal(await page.evaluate(() => !!navigator.serviceWorker.controller), false, 'the worker took over before the first screen loaded');
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 20000 });
+    // One visit, never reloaded online: the page asks again (through the worker) for the book's
+    // JSON and for every thumbnail it already shows.
+    await apiCached(page);
+    await poll(
+      page,
+      async (name) => {
+        const thumbs = await caches.open(name);
+        const keys = new Set((await thumbs.keys()).map((r) => new URL(r.url).pathname + new URL(r.url).search));
+        const inView = [...document.querySelectorAll('.page .frame img')].filter((i) => {
+          const r = i.getBoundingClientRect();
+          return r.bottom > 0 && r.top < innerHeight && i.currentSrc;
+        });
+        const missing = inView.map((i) => new URL(i.currentSrc).pathname + new URL(i.currentSrc).search).filter((u) => !keys.has(u));
+        return (inView.length > 0 && missing.length === 0) || { inView: inView.length, missing };
       },
-      null,
-      { timeout: 15000, polling: 200 },
+      THUMB_CACHE,
+      { what: 'the thumbnails on screen in the worker cache' },
     );
+
+    // Online, navigations still reach the server (so its current CSP reaches installed apps).
+    const before = proxy.count('/c/folder');
+    const nav = await page.goto('/c/folder');
+    assert.equal(proxy.count('/c/folder'), before + 1, 'an online navigation was answered from the precache');
+    assert.equal(nav.fromServiceWorker(), true);
+    assert.match(nav.headers()['content-security-policy'] || '', /script-src 'self'/);
+    await page.locator('section.page').first().waitFor();
+
+    // Read the whole book once online (through the worker now).
     await scrollThrough(page);
     await page.waitForTimeout(500);
+    // Only real thumbnails are kept: immutable, and smaller than the files they show.
+    const sizes = Object.fromEntries(fs.readdirSync(ws).filter((n) => /\.(jpg|mp4)$/.test(n)).map((n) => [n, fs.statSync(path.join(ws, n)).size]));
+    const kept = await page.evaluate(async (name) => {
+      const c = await caches.open(name);
+      const out = [];
+      for (const req of await c.keys()) {
+        const res = await c.match(req);
+        out.push({ url: req.url, cc: res.headers.get('cache-control'), size: (await res.blob()).size });
+      }
+      return out;
+    }, THUMB_CACHE);
+    assert.ok(kept.length >= 26, `only ${kept.length} thumbnails cached`);
+    for (const k of kept) {
+      const file = decodeURIComponent(new URL(k.url).pathname.split('/').pop());
+      assert.match(k.cc || '', /immutable/, k.url);
+      assert.ok(k.size < sizes[file], `${file}: a ${k.size}-byte "thumbnail" of a ${sizes[file]}-byte file`);
+    }
 
     // The laptop is off and the phone has no network. (Chromium's offline emulation does not
-    // cover the service worker's own fetches, so the server really goes away.)
+    // cover the service worker's own fetches, so the server really goes away.) The browser's own
+    // HTTP cache is emptied too: only the worker may answer.
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Network.clearBrowserCache');
+    await cdp.detach();
+    await proxy.close();
     await srv.stop();
     await context.setOffline(true);
     await page.reload();
     await page.locator('section.page').nth(3).waitFor();
-    assert.match(await page.locator('.offline-note').textContent(), /^Offline · showing the last saved copy$/);
+    assert.match(await page.locator('.offline-note').textContent(), /^\s*Offline · showing the last saved copy\s*$/);
     await imagesInViewLoaded(page);
     await shot(page, 'phone-light-offline');
     await scrollThrough(page);
+
+    // The viewer offline, from a tile that only cached its small thumbnail, through the chapter.
+    const order = await page.evaluate(() => [...document.querySelectorAll('.page [data-item]')].map((el) => el.dataset.item));
+    await page.evaluate(() => scrollTo(0, 0));
+    await page.locator('[data-item="l:0002_the_old_casino.jpg"]').tap();
+    await page.waitForURL(`**${itemUrl('0002_the_old_casino.jpg')}`);
+    await settled(page);
+    await viewerSlideShown(page);
+    for (let k = order.indexOf('l:0002_the_old_casino.jpg') + 1; k < order.length; k++) {
+      await page.keyboard.press('ArrowRight');
+      await page.waitForURL(`**/i/${enc(order[k])}`);
+      await viewerSlideShown(page).catch(() => {
+        throw new Error(`offline viewer: ${order[k]} shows nothing`);
+      });
+    }
+    // A link straight to a photo, offline.
+    await page.goto(itemUrl('0005_lanterns.jpg'));
+    await page.locator('.viewer').waitFor();
+    await viewerSlideShown(page);
+    // Play offline: the title, Day 1, then the first two photos.
+    await page.goto('/c/folder/play');
+    await page.locator('.player').waitFor();
+    for (const name of ['0001_arrival_in_constanța.jpg', '0002_the_old_casino.jpg']) {
+      await page.keyboard.press('ArrowRight');
+      if (name.startsWith('0001')) await page.keyboard.press('ArrowRight');
+      await page.waitForFunction(() => {
+        const img = document.querySelector('.player .slide:not(.leaving) .photo img');
+        return !!img && img.complete && img.naturalWidth > 0;
+      }, null, { timeout: 6000 });
+    }
+
     await page.goto('/').catch(() => {}); // a fresh navigation is answered by the worker too
     await page.locator('a.chapter').waitFor();
     assert.match(await page.locator('.offline-note').textContent(), /Offline/);
@@ -473,11 +650,268 @@ async function offline(srv) {
     await page.reload();
     await page.locator('a.chapter').waitFor();
     assert.match(await page.locator('.offline-note').textContent(), /Offline/);
-    // Only the expected failures happened (network attempts of the API and the worker update).
-    const unexpected = problems.filter((p) => !/\/api\/|\/sw\.js|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION_REFUSED|Failed to load resource/.test(p));
+    // Only the expected failures happened (network attempts of the API, media and the worker update).
+    const unexpected = problems.filter((p) => !/\/api\/|\/sw\.js|\/media\/local\/display\/|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION_REFUSED|ERR_FAILED|Failed to load resource/.test(p));
     assert.deepEqual(unexpected, []);
   } finally {
     await context.close();
+    await proxy.close().catch(() => {});
+    await srv.stop();
+  }
+}
+
+/** Atlas stopped while the laptop (and `tailscale serve`) is up: every request gets a 502. */
+async function gateway(book) {
+  const ws = copyWorkspace(book.ws, 'gateway');
+  const srv = await startServer(ws);
+  const proxy = await startProxy(srv.port);
+  const { context, page } = await newPage(proxy.base, 'phone', 'light');
+  try {
+    await page.goto('/c/folder');
+    await page.locator('section.page').first().waitFor();
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 20000 });
+    await apiCached(page);
+    await srv.stop();
+    assert.equal((await request(proxy.port, '/api/atlas')).status, 502, 'the proxy answers 502');
+    await page.reload();
+    await page.locator('section.page').nth(3).waitFor();
+    assert.match(await page.locator('.offline-note').textContent(), /^\s*Offline · showing the last saved copy\s*$/);
+    await page.goto('/');
+    await page.locator('a.chapter').waitFor();
+    assert.match(await page.locator('.offline-note').textContent(), /Offline/);
+  } finally {
+    await context.close();
+    await proxy.close();
+    await srv.stop();
+  }
+}
+
+/** The laptop answers after the worker's 6 s timeout: the saved copy first, then the fresh one, by itself. */
+async function slowLaptop(book) {
+  const ws = copyWorkspace(book.ws, 'slow');
+  const srv = await startServer(ws);
+  const proxy = await startProxy(srv.port);
+  const { context, page, problems } = await newPage(proxy.base, 'phone', 'light');
+  try {
+    await page.goto('/c/folder');
+    await page.locator('section.page').nth(3).waitFor();
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 20000 });
+    await apiCached(page);
+    const tiles = () => page.locator('.page .frame').count();
+    assert.equal(await tiles(), 26);
+    // A new photo reaches the laptop, and its next scan takes longer than the worker waits.
+    fs.copyFileSync(path.join(ws, '0026_home.jpg'), path.join(ws, '0027_one_more.jpg'));
+    proxy.delay(/^\/api\/(atlas|chapters\/folder)$/, 9000);
+    const asked = proxy.count('/api/chapters/folder');
+    await page.reload();
+    await page.locator('section.page').nth(3).waitFor({ timeout: 12000 });
+    assert.match(await page.locator('.offline-note').textContent(), /slow to answer · showing the last saved copy/);
+    assert.equal(await tiles(), 26);
+    // The fresh copy replaces it when it lands: no reload, no retry, no visibilitychange.
+    await page.waitForFunction(() => document.querySelectorAll('.page .frame').length === 27 && !document.querySelector('.offline-note'), null, { timeout: 15000 });
+    assert.equal(proxy.count('/api/chapters/folder'), asked + 1, 'the chapter was asked for again');
+    // The cover got its fresh copy the same way.
+    await page.locator('nav.bar a[aria-label="All chapters"]').tap();
+    await page.locator('a.chapter').waitFor();
+    assert.match(await page.locator('a.chapter .t-meta').textContent(), /27 photos & videos/);
+    assert.equal(await page.locator('.offline-note').count(), 0);
+    await cleanUp(page, problems);
+  } finally {
+    await context.close();
+    await proxy.close();
+    await srv.stop();
+  }
+}
+
+/** A new build on the same origin: an app that comes back to the front checks and reloads into it. */
+async function deploy(book) {
+  const distB = path.join(tmpRoot, 'dist-b');
+  fs.cpSync(DIST, distB, { recursive: true });
+  const html = fs.readFileSync(path.join(distB, 'index.html'), 'utf8');
+  fs.writeFileSync(path.join(distB, 'index.html'), html.replace('<head>', '<head>\n    <meta name="atlas-build" content="B" />'));
+  fs.appendFileSync(path.join(distB, 'sw.js'), '\n// build B\n');
+  const a = await startServer(copyWorkspace(book.ws, 'deploy-a'));
+  const b = await startServer(copyWorkspace(book.ws, 'deploy-b'), { ATLAS_WEB_DIST: distB });
+  const proxy = await startProxy(a.port);
+  const { context, page } = await newPage(proxy.base, 'phone', 'light');
+  const isB = () => page.evaluate(() => !!document.querySelector('meta[name="atlas-build"]'));
+  try {
+    await page.goto('/c/folder');
+    await page.locator('section.page').first().waitFor();
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 20000 });
+    await page.waitForTimeout(500);
+    assert.equal(await isB(), false);
+    proxy.upstream = b.port; // the deploy
+    const checks = proxy.count('/sw.js');
+    const reloaded = page.waitForEvent('load', { timeout: 15000 });
+    // The phone unlocks with the app still in memory.
+    await page.evaluate(() => {
+      for (const v of ['hidden', 'visible']) {
+        Object.defineProperty(document, 'visibilityState', { value: v, configurable: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+      }
+    });
+    await reloaded;
+    await page.locator('section.page').first().waitFor();
+    assert.ok(proxy.count('/sw.js') > checks, 'no update check when the app came back');
+    assert.equal(await isB(), true, 'still the old build after the update');
+  } finally {
+    await context.close();
+    await proxy.close();
+    await a.stop();
+    await b.stop();
+  }
+}
+
+/** Without ImageMagick the server sends the photos themselves as thumbnails: never kept. */
+async function noToolsCache(book) {
+  const srv = await startServer(copyWorkspace(book.ws, 'notools'), { ATLAS_NO_TOOLS: '1' });
+  const { context, page, problems } = await newPage(srv.base, 'phone', 'light');
+  try {
+    await page.goto('/c/folder');
+    await page.locator('section.page').first().waitFor();
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 20000 });
+    await page.reload();
+    await page.locator('section.page').nth(3).waitFor();
+    await scrollThrough(page);
+    await page.waitForTimeout(500);
+    // In any of the worker's caches (whatever their names).
+    const kept = await page.evaluate(async () => {
+      const out = [];
+      for (const name of await caches.keys()) {
+        for (const r of await (await caches.open(name)).keys()) if (new URL(r.url).pathname.startsWith('/media/')) out.push(`${name}: ${r.url}`);
+      }
+      return out;
+    });
+    assert.deepEqual(kept, [], 'full-size files kept as thumbnails');
+    await cleanUp(page, problems);
+  } finally {
+    await context.close();
+    await srv.stop();
+  }
+}
+
+/** Esc, Close or Back during a step animation: the viewer stays closed and the chapter keeps its history entry. */
+async function viewerCloseRace(srv) {
+  const { context, page, problems } = await newPage(srv.base, 'desktop', 'light');
+  try {
+    for (const [how, ms] of [['Escape', 40], ['close', 40], ['back', 40], ['back', 200]]) {
+      await page.goto('/c/folder');
+      await page.locator('section.page').first().waitFor();
+      await settled(page);
+      await page.locator('[data-item="l:0008_harbour.jpg"]').click();
+      await page.waitForURL(`**${itemUrl('0008_harbour.jpg')}`);
+      await page.locator('.viewer').waitFor();
+      await settled(page);
+      await page.keyboard.press('ArrowRight');
+      await page.waitForTimeout(ms);
+      if (how === 'Escape') await page.keyboard.press('Escape');
+      else if (how === 'close') await page.getByRole('button', { name: 'Close', exact: true }).click();
+      else await page.evaluate(() => history.back());
+      await page.waitForTimeout(1200);
+      assert.equal(new URL(page.url()).pathname, '/c/folder', `${how} at ${ms} ms`);
+      assert.equal(await page.locator('.viewer').count(), 0, `${how} at ${ms} ms: the viewer opened again`);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      assert.equal(new URL(page.url()).pathname, '/c/folder', `${how} at ${ms} ms: the chapter's history entry was replaced`);
+    }
+    await cleanUp(page, problems);
+  } finally {
+    await context.close();
+  }
+}
+
+/** With the details open, a swipe down (on the photo or the grip) hides only them; a tap too. */
+async function viewerSheet(srv) {
+  const { context, page, problems } = await newPage(srv.base, 'phone', 'dark');
+  const { width: W, height: H } = DEVICES.phone.viewport;
+  const sheet = page.locator('.viewer .sheet');
+  const url = itemUrl('0008_harbour.jpg');
+  const open = async () => {
+    await swipe(page, { x: W / 2, y: H * 0.7 }, { x: W / 2, y: H * 0.35 });
+    await sheet.waitFor();
+    await page.waitForTimeout(450);
+  };
+  try {
+    await page.goto(url);
+    await page.locator('.viewer').waitFor();
+    await settled(page);
+    await open();
+    await swipe(page, { x: W / 2, y: H * 0.15 }, { x: W / 2, y: H * 0.45 });
+    await sheet.waitFor({ state: 'detached' });
+    assert.equal(await page.locator('.viewer').count(), 1, 'the swipe closed the whole viewer');
+    assert.equal(new URL(page.url()).pathname, url);
+    await open();
+    const grip = await page.locator('.viewer .sheet .grip').boundingBox();
+    await swipe(page, { x: grip.x + grip.width / 2, y: grip.y + grip.height / 2 }, { x: grip.x + grip.width / 2, y: grip.y + 160 });
+    await sheet.waitFor({ state: 'detached' });
+    assert.equal(await page.locator('.viewer').count(), 1);
+    await open();
+    await page.touchscreen.tap(W / 2, H * 0.2);
+    await sheet.waitFor({ state: 'detached' });
+    assert.equal(await page.locator('.viewer.chrome').count(), 1, 'the tap that hid the details also hid the chrome');
+    await cleanUp(page, problems);
+  } finally {
+    await context.close();
+  }
+}
+
+/** Play: a pause during the wait after an unplayable video, the end card, and Play again after a pause. */
+async function playFlow(srv) {
+  const { context, page, problems } = await newPage(srv.base, 'desktop', 'light');
+  try {
+    await page.goto('/c/folder/play');
+    await page.locator('.player').waitFor();
+    // Title, Day 1, 0001–0006, Day 2, 0007–0009, then the video 0010.
+    for (let k = 0; k < 12; k++) await page.keyboard.press('ArrowRight');
+    await page.waitForFunction(() => /10 \/ 26/.test(document.querySelector('.player .count')?.textContent || ''));
+    const failed = await page
+      .waitForFunction(() => /can’t play/.test(document.querySelector('.player')?.textContent || ''), null, { timeout: 2500 })
+      .then(() => true, () => false);
+    if (failed) {
+      await page.keyboard.press(' ');
+      await page.waitForTimeout(500);
+      await page.keyboard.press(' ');
+      await page.waitForFunction(() => /11 \/ 26/.test(document.querySelector('.player .count')?.textContent || ''), null, { timeout: 4500 });
+    } else console.log('        (this Chromium plays the fixture video: the unplayable-video wait is not exercised)');
+    // Paused, then to the end: the end card has no pause control and no stale "Paused".
+    await page.keyboard.press(' ');
+    await page.getByRole('button', { name: 'Resume' }).waitFor();
+    for (let k = 0; k < 40 && !/The end/.test(await page.locator('.player .stage').textContent()); k++) {
+      await page.keyboard.press('ArrowRight');
+      await page.waitForTimeout(30);
+    }
+    await page.waitForTimeout(1000);
+    assert.match(await page.locator('.player .stage').textContent(), /The end/);
+    assert.equal(await page.locator('.player .controls').count(), 0, 'pause controls on the end card');
+    assert.equal((await page.locator('.player .sr-only').textContent()).trim(), '');
+    await shot(page, 'desktop-light-play-end');
+    await page.getByRole('button', { name: 'Play again' }).click();
+    await page.waitForFunction(() => /Day 1/.test(document.querySelector('.player .slide:not(.leaving)')?.textContent || ''), null, { timeout: 4500 });
+    await cleanUp(page, problems);
+  } finally {
+    await context.close();
+  }
+}
+
+/** Classic (non-overlay) scrollbars, as on Windows: the viewer and Play still span the window. */
+async function fullWidthOverlays(srv) {
+  const b = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'] });
+  try {
+    const context = await b.newContext({ viewport: { width: 1440, height: 900 }, baseURL: srv.base });
+    const page = await context.newPage();
+    await page.goto('/c/folder');
+    await page.locator('section.page').first().waitFor();
+    const gutter = await page.evaluate(() => innerWidth - document.documentElement.clientWidth);
+    for (const [url, sel] of [[itemUrl('0008_harbour.jpg'), '.viewer'], ['/c/folder/play', '.player']]) {
+      await page.goto(url);
+      await page.locator(sel).waitFor();
+      await page.waitForTimeout(300);
+      const [w, inner] = await page.evaluate((q) => [document.querySelector(q).getBoundingClientRect().width, innerWidth], sel);
+      assert.equal(w, inner, `${sel} is ${w}px in a ${inner}px window (scrollbar gutter ${gutter}px)`);
+    }
+  } finally {
+    await b.close();
   }
 }
 
@@ -533,7 +967,15 @@ try {
     }
   }
   await test('reduced motion: Play crossfades without the drift', () => reducedMotion(srv));
-  await test('offline: the app shell, last chapter and thumbnails from the service worker', () => offline(srv));
+  await test('viewer: Esc, Close or Back during a step animation stays closed', () => viewerCloseRace(srv));
+  await test('viewer: with the details open, a swipe down or a tap hides only them', () => viewerSheet(srv));
+  await test('play: pause during an unplayable video, the end card, Play again after a pause', () => playFlow(srv));
+  await test('classic scrollbars: the viewer and Play span the whole window', () => fullWidthOverlays(srv));
+  await test('no ImageMagick: originals sent as thumbnails are never kept by the worker', () => noToolsCache(book));
+  await test('offline after one visit: shell, story, viewer and Play from the service worker', () => offline(book));
+  await test('Atlas stopped behind a proxy (502): the saved copy, marked offline', () => gateway(book));
+  await test('slow laptop: the saved copy first, then the fresh one by itself', () => slowLaptop(book));
+  await test('a new deploy: an app back from the background reloads into it', () => deploy(book));
 } catch (err) {
   results.push({ name: 'setup', ok: false, err });
   console.log(`FATAL ${err.stack || err}`);

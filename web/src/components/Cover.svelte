@@ -1,12 +1,13 @@
 <!-- Cover: the book's chapters by year, newest first; upcoming and ongoing ones on top. -->
 <script lang="ts">
   import Icon from './Icon.svelte';
-  import { chapterStats, chapterYear, initials } from '../lib/format';
+  import { avatarColors, chapterStats, chapterYear, initials } from '../lib/format';
   import { chapterPath, router } from '../lib/router.svelte';
   import { loadAtlas, prefetchChapter, store, vt } from '../lib/store.svelte';
   import type { ChapterSummary } from '../lib/types';
-  import { motion } from '../lib/viewport.svelte';
+  import { motion, viewport } from '../lib/viewport.svelte';
   import { prefs } from '../lib/prefs.svelte';
+  import { coverSizes, largeSrcset } from '../lib/sizes';
 
   const atlas = $derived(store.atlas);
 
@@ -43,7 +44,14 @@
   const people = $derived(atlas?.people ?? []);
   const me = $derived(people.find((p) => p.name === prefs.me) ?? null);
   const avatars = $derived(me ? [me, ...people.filter((p) => p !== me)].slice(0, 2) : people.slice(0, 2));
-  const heroName = (id: string) => (vt.hero === id && router.route.name === 'cover' && !motion.reduced ? 'hero' : null);
+  // Cover <-> Story: the chapter in transit morphs its image and its words (title, dates, counts).
+  const inTransit = (id: string) => vt.hero === id && router.route.name === 'cover' && !motion.reduced;
+  const heroName = (id: string) => (inTransit(id) ? 'hero' : null);
+  const wordsName = (id: string) => (inTransit(id) ? 'chapter-words' : null);
+
+  // The cover image's box: the column, 4:5 on a phone, 16:9 (at most 62% of the height) on a desktop.
+  const boxW = $derived(Math.min(viewport.w - 2 * (viewport.desktop ? 40 : 16), 1040));
+  const boxH = $derived(viewport.desktop ? Math.min((boxW * 9) / 16, viewport.h * 0.62) : (boxW * 5) / 4);
   const statusWord = (c: ChapterSummary) => (c.status === 'ongoing' ? 'Now' : c.status === 'upcoming' ? 'Upcoming' : '');
 </script>
 
@@ -59,7 +67,8 @@
       {#if avatars.length}
         <span class="avatars" aria-hidden="true">
           {#each avatars as p (p.name)}
-            <span class="avatar" class:me={p === me} style:background={p.color}>{initials(p.name)}</span>
+            {@const colors = avatarColors(p.color)}
+            <span class="avatar" class:me={p === me} style:background={colors.bg} style:color={colors.ink}>{initials(p.name)}</span>
           {/each}
         </span>
       {:else}
@@ -70,7 +79,9 @@
 
   <main>
     {#if store.atlasFromCache}
-      <p class="t-meta offline-note col" role="status">Offline · showing the last saved copy</p>
+      <p class="t-meta offline-note col" role="status">
+        {store.atlasSlow ? 'The laptop is slow to answer' : 'Offline'} · showing the last saved copy
+      </p>
     {/if}
 
     {#if atlas && groups.length}
@@ -87,10 +98,17 @@
             >
               <div class="media">
                 {#if c.cover}
-                  <img src={c.cover.urls.t1200} alt="" decoding="async" style:view-transition-name={heroName(c.id)} />
+                  <img
+                    src={c.cover.urls.t1200}
+                    srcset={largeSrcset(c.cover)}
+                    sizes={coverSizes(boxW, boxH, c.cover)}
+                    alt=""
+                    decoding="async"
+                    style:view-transition-name={heroName(c.id)}
+                  />
                 {/if}
               </div>
-              <div class="words">
+              <div class="words" style:view-transition-name={wordsName(c.id)}>
                 {#if statusWord(c) || c.range}
                   <p class="t-kicker">
                     {#if statusWord(c)}<span class="status">{statusWord(c)}</span>{/if}{c.range ?? ''}
@@ -193,7 +211,6 @@
     font-size: 12px;
     line-height: 1;
     font-weight: 650;
-    color: #fff;
     box-shadow: 0 0 0 2px var(--paper);
   }
 
@@ -278,12 +295,16 @@
     max-width: 14em;
   }
 
+  /* The block keeps the column's left edge (under the wordmark); only the lines are short. */
   .empty {
     display: grid;
     justify-items: start;
     gap: 12px;
     margin-top: 18vh;
-    max-width: 30em;
+  }
+
+  .empty > * {
+    max-width: 30rem;
   }
 
   .empty-title {

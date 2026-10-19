@@ -1,5 +1,6 @@
 // App-wide state: the atlas index, a small in-memory chapter cache and UI flags.
-import { ApiError, fetchAtlas, fetchChapter } from './api';
+import { ApiError, fetchAtlas, fetchChapter, normAtlas, normChapterData } from './api';
+import { API_UPDATED } from './cache-names';
 import type { AtlasIndex, ChapterData, ChapterSummary } from './types';
 
 export type LoadState = 'idle' | 'loading' | 'ready' | 'error';
@@ -9,8 +10,12 @@ export const store = $state<{
   atlasState: LoadState;
   atlasError: ApiError | null;
   atlasFromCache: boolean;
+  /** The saved copy is shown because the laptop was slow to answer (not unreachable). */
+  atlasSlow: boolean;
   settingsOpen: boolean;
-}>({ atlas: null, atlasState: 'idle', atlasError: null, atlasFromCache: false, settingsOpen: false });
+  /** Bumped when the service worker hands over a fresh copy of a chapter (see applyFresh). */
+  chapterEpoch: number;
+}>({ atlas: null, atlasState: 'idle', atlasError: null, atlasFromCache: false, atlasSlow: false, settingsOpen: false, chapterEpoch: 0 });
 
 /**
  * Which elements carry the shared view-transition names during the next route change:
@@ -24,9 +29,10 @@ export function loadAtlas(): Promise<void> {
   if (atlasInflight) return atlasInflight;
   if (!store.atlas) store.atlasState = 'loading';
   atlasInflight = fetchAtlas()
-    .then(({ data, fromCache }) => {
+    .then(({ data, fromCache, slow }) => {
       store.atlas = data;
       store.atlasFromCache = fromCache;
+      store.atlasSlow = slow;
       store.atlasError = null;
       store.atlasState = 'ready';
       document.title = data.title ? `${data.title} · Atlas` : 'Atlas';
@@ -45,9 +51,10 @@ export function chapterSummary(id: string): ChapterSummary | null {
   return store.atlas?.chapters.find((c) => c.id === id) ?? null;
 }
 
-interface CachedChapter {
+export interface CachedChapter {
   data: ChapterData;
   fromCache: boolean;
+  slow: boolean;
 }
 
 const chapters = new Map<string, CachedChapter>();
@@ -66,7 +73,7 @@ export function loadChapter(id: string): Promise<CachedChapter> {
   requestedChapters.add(id);
   const p = fetchChapter(id)
     .then((res) => {
-      const entry = { data: res.data, fromCache: res.fromCache };
+      const entry = { data: res.data, fromCache: res.fromCache, slow: res.slow };
       // Keep a network copy over a cached fallback that arrives later.
       const prev = chapters.get(id);
       if (!prev || !res.fromCache || prev.fromCache) chapters.set(id, entry);
@@ -84,3 +91,61 @@ export function prefetchChapter(id: string): void {
 
 /** The thumbnail URL a tile was showing when it was opened: the viewer starts from it. */
 export const seedSrc = new Map<string, string>();
+
+/**
+ * The service worker answered from its cache because the laptop was slow, and the network copy has
+ * now arrived: show it (the network copy wins over any saved one).
+ */
+export function applyFresh(path: string, raw: unknown): void {
+  try {
+    if (path === '/api/atlas') {
+      store.atlas = normAtlas(raw);
+      store.atlasFromCache = false;
+      store.atlasSlow = false;
+      store.atlasError = null;
+      store.atlasState = 'ready';
+      return;
+    }
+    const m = /^\/api\/chapters\/([^/]+)$/.exec(path);
+    if (!m) return;
+    const id = decodeURIComponent(m[1]);
+    if (!requestedChapters.has(id)) return;
+    chapters.set(id, { data: normChapterData(raw), fromCache: false, slow: false });
+    store.chapterEpoch++;
+  } catch {
+    /* a bad body or path: keep what is shown */
+  }
+}
+
+/** Listen for fresh copies posted by the service worker (see src/sw.ts). */
+export function listenForFreshCopies(): void {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.addEventListener('message', (e: MessageEvent) => {
+    const d = e.data as { type?: unknown; path?: unknown; data?: unknown } | null;
+    if (d && d.type === API_UPDATED && typeof d.path === 'string') applyFresh(d.path, d.data);
+  });
+}
+
+/**
+ * While a saved copy is shown, try again when the network comes back and on a slow backoff
+ * (5 s, 15 s, then every minute). Returns the stop function.
+ */
+export function retryWhileStale(reload: () => void): () => void {
+  const delays = [5000, 15000, 60000];
+  let n = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const arm = () => {
+    timer = setTimeout(() => {
+      if (document.visibilityState === 'visible') reload();
+      n = Math.min(n + 1, delays.length - 1);
+      arm();
+    }, delays[n]);
+  };
+  const online = () => reload();
+  window.addEventListener('online', online);
+  arm();
+  return () => {
+    if (timer) clearTimeout(timer);
+    window.removeEventListener('online', online);
+  };
+}

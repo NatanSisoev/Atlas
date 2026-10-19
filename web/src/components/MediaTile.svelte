@@ -28,8 +28,15 @@
 
   const video = $derived(item.kind === 'video');
   const duration = $derived(video ? fmtDuration(item.durationSec) : '');
+  // t2400 is for full-width rows (a panorama is 1040 css px, 2080 device px on a 2x screen).
   const srcset = $derived(
-    [item.urls.t400 && `${item.urls.t400} 400w`, item.urls.t1200 && `${item.urls.t1200} 1200w`].filter(Boolean).join(', '),
+    [
+      item.urls.t400 && `${item.urls.t400} 400w`,
+      item.urls.t1200 && `${item.urls.t1200} 1200w`,
+      item.urls.t2400 && `${item.urls.t2400} 2400w`,
+    ]
+      .filter(Boolean)
+      .join(', '),
   );
   const label = $derived.by(() => {
     const parts = [item.caption || (video ? 'Video' : 'Photo')];
@@ -80,7 +87,7 @@
     {/if}
   </a>
   {#if item.caption}
-    <figcaption class="t-caption" aria-hidden="true">{item.caption}</figcaption>
+    <figcaption class="t-caption" class:narrow={width < 140} aria-hidden="true">{item.caption}</figcaption>
   {/if}
 </figure>
 
@@ -98,9 +105,21 @@
     -webkit-touch-callout: none;
   }
 
+  /* The ring stays inside the frame (the gap to the next photo is only 3px on a phone): an ink
+     ring with a paper ring inside it, visible on light and dark photos alike. */
   .frame:focus-visible {
-    outline-offset: 3px;
+    outline: 2px solid var(--ink);
+    outline-offset: -2px;
     border-radius: 0;
+  }
+
+  .frame:focus-visible::after {
+    content: '';
+    position: absolute;
+    z-index: 1;
+    inset: 2px;
+    box-shadow: inset 0 0 0 2px var(--paper);
+    pointer-events: none;
   }
 
   img {
@@ -140,7 +159,7 @@
     padding-left: 2px;
     border-radius: 50%;
     color: #fff;
-    background: rgba(14, 14, 13, 0.38);
+    background: rgba(14, 14, 13, 0.5);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset;
@@ -148,9 +167,6 @@
   }
 
   @media (min-width: 720px) {
-    figcaption {
-      padding: 8px 4px 12px 0;
-    }
     .glyph {
       width: 48px;
       height: 48px;
@@ -171,14 +187,18 @@
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.01em;
     color: #fff;
-    background: rgba(14, 14, 13, 0.5);
+    /* At least 4.5:1 for the 11px label even over a white poster. */
+    background: rgba(14, 14, 13, 0.66);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     pointer-events: none;
   }
 
+  /* The spacing is margin, not padding: overflow clips at the padding box, so padding below a
+     clamped box would show the top of its next line. */
   figcaption {
-    padding: 6px 2px 8px 0;
+    margin: 6px 2px 8px 0;
+    padding: 0;
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
@@ -186,5 +206,17 @@
     overflow: hidden;
     overflow-wrap: anywhere;
     hyphens: auto;
+  }
+
+  /* Narrow tiles (portraits on a phone) get a third line. */
+  figcaption.narrow {
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
+
+  @media (min-width: 720px) {
+    figcaption {
+      margin: 8px 4px 12px 0;
+    }
   }
 </style>

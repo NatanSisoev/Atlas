@@ -1,12 +1,12 @@
 <!-- Immersive viewer over the chapter: swipe or arrow keys to step, swipe down or Esc to close,
      tap to toggle chrome, "i" or swipe up for details. -->
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { flushSync, onMount, tick } from 'svelte';
   import Icon from './Icon.svelte';
   import ProgressiveImg from './ProgressiveImg.svelte';
   import type { Item } from '../lib/types';
   import { fmtDuration, fmtTaken } from '../lib/format';
-  import { chapterPath, itemPath, leaveTo, navigate } from '../lib/router.svelte';
+  import { chapterPath, itemPath, leaveTo, navigate, parse } from '../lib/router.svelte';
   import { seedSrc, vt } from '../lib/store.svelte';
   import { motion } from '../lib/viewport.svelte';
 
@@ -16,7 +16,16 @@
     order,
     items,
     itemId,
-  }: { chapterId: string; chapterTitle: string; order: string[]; items: Record<string, Item>; itemId: string } = $props();
+    aspects = {},
+  }: {
+    chapterId: string;
+    chapterTitle: string;
+    order: string[];
+    items: Record<string, Item>;
+    itemId: string;
+    /** Aspect ratios the story learned from loaded thumbnails (when the server's were missing or wrong). */
+    aspects?: Record<string, number>;
+  } = $props();
 
   const GAP = 24;
 
@@ -40,6 +49,21 @@
   let dy = $state(0);
   let animating = $state(false);
   let videoFailed = $state<Record<string, boolean>>({});
+  /** Slides whose t1200 failed (offline, never fetched): they show the tile's t400 instead. */
+  let thin = $state<Record<string, boolean>>({});
+  /** The details sheet follows a downward drag by this much. */
+  let sheetDy = $state(0);
+  let sheetSettling = $state(false);
+  /** Set once the viewer is closing: pending step animations must not navigate any more. */
+  let closed = false;
+
+  /** The photo's shape, so the media box is exactly the photo (no letterbox in the morph). */
+  const aspectOf = (id: string): number | null => {
+    const a = aspects[id];
+    if (a && Number.isFinite(a)) return a;
+    const it = items[id];
+    return it?.w && it?.h ? it.w / it.h : null;
+  };
 
   const isVideo = (id: string) => items[id]?.kind === 'video';
   const original4k = $derived(!!current && current.kind === 'video' && Math.max(current.w ?? 0, current.h ?? 0) >= 3200);
@@ -48,7 +72,22 @@
 
   // ---- open / close ----
 
+  /**
+   * The viewer is closing: stop a running step at once, so the morph back to the tile starts from
+   * the still photo (a View Transition started over a running transform transition can also hold
+   * the next frames back in Chromium), and no pending step may navigate any more.
+   */
+  function halt() {
+    closed = true;
+    animating = false;
+    dx = 0;
+    dy = 0;
+    flushSync();
+  }
+
   function close() {
+    if (closed) return;
+    halt();
     leaveTo(chapterPath(chapterId));
   }
 
@@ -64,9 +103,17 @@
     const saved = metas.map((m) => m.content);
     metas.forEach((m) => (m.content = '#000000'));
     const returnFocus = document.activeElement as HTMLElement | null;
+    // Browser or Android Back: in the capture phase, so before the router starts its transition.
+    const onpop = () => {
+      const r = parse(location.pathname);
+      if (r.name !== 'viewer' || r.id !== chapterId) halt();
+    };
+    window.addEventListener('popstate', onpop, true);
     // The dialog itself takes focus (not the close button: no stray focus ring on a deep link).
     root?.focus({ preventScroll: true });
     return () => {
+      closed = true;
+      window.removeEventListener('popstate', onpop, true);
       html.classList.remove('locked');
       metas.forEach((m, i) => (m.content = saved[i]));
       const last = itemId;
@@ -93,7 +140,14 @@
 
   // ---- stepping ----
 
+  /**
+   * Step to `id` by replacing this entry. Only while this viewer is still what the address bar
+   * shows: on Back (or Esc/Close) during a step animation, location changes at once, while the
+   * route and this component follow a moment later.
+   */
   function go(id: string) {
+    const r = parse(location.pathname);
+    if (closed || r.name !== 'viewer' || r.id !== chapterId || r.itemId !== itemId) return;
     navigate(itemPath(chapterId, id), { replace: true, scroll: 'keep', transition: false });
   }
 
@@ -105,6 +159,7 @@
       animating = true;
       dx = -dir * 36;
       await wait(140);
+      if (closed) return;
       dx = 0;
       await wait(240);
       animating = false;
@@ -117,6 +172,7 @@
     animating = true;
     dx = -dir * (stageW + GAP);
     await wait(260);
+    if (closed) return;
     animating = false;
     dx = 0;
     go(target);
@@ -131,7 +187,7 @@
   function onpointerdown(e: PointerEvent) {
     if (e.button !== 0 || animating || start) return;
     const el = e.target as HTMLElement;
-    if (el.closest('button, a, .sheet')) return;
+    if (el.closest('button, a')) return;
     // Leave the native video controls alone.
     if (el instanceof HTMLVideoElement) {
       const r = el.getBoundingClientRect();
@@ -156,6 +212,9 @@
     if (start.axis === 'x') {
       const edge = (mx > 0 && !prevId) || (mx < 0 && !nextId);
       dx = edge ? mx * 0.3 : mx;
+    } else if (info) {
+      // With the details open, a drag down moves the sheet, not the photo.
+      sheetDy = Math.max(0, my);
     } else {
       dy = my > 0 ? my : my * 0.3;
     }
@@ -169,8 +228,10 @@
     const my = e.clientY - s.y;
     const ms = Math.max(1, performance.now() - s.t);
     if (!s.axis) {
-      // A tap: toggle the chrome (not on a video, which has its own controls).
-      if (ms < 500 && !(e.target instanceof HTMLVideoElement)) chrome = !chrome;
+      // A tap closes the details first (as Esc does), else toggles the chrome (not on a video,
+      // which has its own controls).
+      if (ms < 500 && info) info = false;
+      else if (ms < 500 && !(e.target instanceof HTMLVideoElement)) chrome = !chrome;
       return;
     }
     if (s.axis === 'x') {
@@ -178,6 +239,11 @@
       if ((Math.abs(mx) > stageW * 0.2 || fast) && (mx < 0 ? nextId : prevId)) {
         finishStep(mx < 0 ? 1 : -1);
       } else snapBack();
+    } else if (info) {
+      // With the details open, a swipe down only dismisses them; a swipe up does nothing.
+      const fast = my / ms > 0.5 && my > 0;
+      if (my > 40 || fast) hideSheet();
+      else settleSheet();
     } else {
       const fast = Math.abs(my) / ms > 0.5;
       if (my > 110 || (fast && my > 40)) {
@@ -196,6 +262,7 @@
     animating = true;
     dx = -dir * (stageW + GAP);
     await wait(240);
+    if (closed) return;
     animating = false;
     dx = 0;
     go(target);
@@ -212,6 +279,53 @@
   function onpointercancel() {
     start = null;
     snapBack();
+    settleSheet();
+  }
+
+  // ---- the details sheet: its top edge (the grip) can be dragged down ----
+
+  function hideSheet() {
+    info = false;
+    sheetDy = 0;
+  }
+
+  async function settleSheet() {
+    if (!sheetDy) return;
+    sheetSettling = true;
+    sheetDy = 0;
+    await wait(240);
+    sheetSettling = false;
+  }
+
+  let grab: { y: number; t: number; id: number } | null = null;
+
+  function ongripdown(e: PointerEvent) {
+    if (e.button !== 0 || grab) return;
+    grab = { y: e.clientY, t: performance.now(), id: e.pointerId };
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function ongripmove(e: PointerEvent) {
+    if (!grab || e.pointerId !== grab.id) return;
+    sheetDy = Math.max(0, e.clientY - grab.y);
+  }
+
+  function ongripup(e: PointerEvent) {
+    if (!grab || e.pointerId !== grab.id) return;
+    const my = e.clientY - grab.y;
+    const ms = Math.max(1, performance.now() - grab.t);
+    grab = null;
+    if (my > 60 || (my > 20 && my / ms > 0.5)) hideSheet();
+    else settleSheet();
+  }
+
+  function ongripcancel() {
+    grab = null;
+    settleSheet();
   }
 
   // ---- keyboard ----
@@ -301,7 +415,14 @@
     <div class="track" class:animating style:transform="translate3d({dx}px, {Math.max(0, dy)}px, 0) scale({dy > 0 ? 1 - Math.min(dy, 400) / 2000 : 1})">
       {#each slides as s (s.id)}
         {@const it = items[s.id]}
-        <div class="slide" style:transform="translateX({s.k * (stageW + GAP)}px)" aria-hidden={s.k !== 0}>
+        {@const ar = aspectOf(s.id)}
+        <div
+          class="slide"
+          class:sized={!!ar}
+          style:--ar={ar}
+          style:transform="translateX({s.k * (stageW + GAP)}px)"
+          aria-hidden={s.k !== 0}
+        >
           {#if it.kind === 'video' && s.k === 0 && !videoFailed[s.id]}
             <!-- svelte-ignore a11y_media_has_caption (home videos have no caption tracks) -->
             <video
@@ -316,11 +437,16 @@
             ></video>
           {:else}
             <ProgressiveImg
-              srcs={s.k === 0
-                ? [seedSrc.get(s.id) ?? '', it.urls.t1200, it.kind === 'photo' ? it.urls.display : '']
-                : [it.urls.t1200]}
+              srcs={thin[s.id]
+                ? [it.urls.t400]
+                : s.k === 0
+                  ? [seedSrc.get(s.id) ?? '', it.urls.t1200, it.kind === 'photo' ? it.urls.display : '']
+                  : [it.urls.t1200]}
               alt={s.k === 0 ? it.caption : ''}
               vtName={s.k === 0 && vt.media === s.id && !motion.reduced ? 'media' : null}
+              onfail={() => {
+                if (!thin[s.id] && it.urls.t400) thin = { ...thin, [s.id]: true };
+              }}
             />
             {#if it.kind === 'video' && s.k === 0}
               <div class="cant-play" role="status">
@@ -373,8 +499,21 @@
   {/if}
 
   {#if info && current}
-    <div class="sheet" role="region" aria-label="Details">
-      <div class="grip" aria-hidden="true"></div>
+    <div
+      class="sheet"
+      class:settling={sheetSettling}
+      role="region"
+      aria-label="Details"
+      style:transform={sheetDy ? `translate(-50%, ${sheetDy}px)` : null}
+    >
+      <div
+        class="grip"
+        aria-hidden="true"
+        onpointerdown={ongripdown}
+        onpointermove={ongripmove}
+        onpointerup={ongripup}
+        onpointercancel={ongripcancel}
+      ></div>
       {#if current.caption}<p class="sheet-caption">{current.caption}</p>{/if}
       <dl>
         {#if taken}
@@ -454,6 +593,8 @@
     grid-template: minmax(0, 1fr) / minmax(0, 1fr);
     place-items: center;
     padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+    /* The padded area is the box the photo fits in (cqw/cqh below). */
+    container-type: size;
   }
 
   /* Wide screens with a mouse: the photo sits between the top bar and the caption, never under them. */
@@ -466,6 +607,15 @@
     .viewer .bottom {
       background: none;
     }
+
+    /* The caption belongs to the centred photo, as in Play. */
+    .viewer .bottom {
+      text-align: center;
+    }
+
+    .viewer .caption {
+      margin-inline: auto;
+    }
   }
 
   .slide > :global(img),
@@ -474,6 +624,15 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
+  }
+
+  /* With the shape known, the media box is the fitted photo itself, not the whole stage: the
+     thumbnail morphs into exactly the photo (no letterbox around it during the transition). */
+  .slide.sized > :global(img),
+  .slide.sized > video {
+    width: min(100cqw, calc(100cqh * var(--ar)));
+    height: auto;
+    aspect-ratio: var(--ar);
   }
 
   video {
@@ -624,7 +783,7 @@
     bottom: 0;
     width: min(100%, 560px);
     transform: translateX(-50%);
-    padding: 12px calc(var(--safe-right) + 20px) calc(var(--safe-bottom) + 24px) calc(var(--safe-left) + 20px);
+    padding: 0 calc(var(--safe-right) + 20px) calc(var(--safe-bottom) + 24px) calc(var(--safe-left) + 20px);
     border-radius: 18px 18px 0 0;
     background: rgba(24, 24, 23, 0.94);
     backdrop-filter: blur(20px);
@@ -632,6 +791,10 @@
     box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.4);
     animation: sheet-in var(--t-slow) var(--ease);
     touch-action: auto;
+  }
+
+  .sheet.settling {
+    transition: transform var(--t-mid) var(--ease);
   }
 
   @keyframes sheet-in {
@@ -647,10 +810,20 @@
     }
   }
 
+  /* The grip is the sheet's whole top edge: drag it down to hide the details. */
   .grip {
+    display: grid;
+    place-items: center;
+    height: 28px;
+    margin: 0 calc(-1 * (var(--safe-right) + 20px)) 4px calc(-1 * (var(--safe-left) + 20px));
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .grip::before {
+    content: '';
     width: 36px;
     height: 4px;
-    margin: 0 auto 16px;
     border-radius: 2px;
     background: rgba(242, 241, 237, 0.25);
   }

@@ -13,7 +13,7 @@ export const FOLDER_CHAPTER_ID = 'folder';
  *   durationSec: number | null, hasDisplay: boolean }} LocalItem
  * @typedef {{ id: string, kind: 'photo' | 'video', name: string, label: string, index: number | null,
  *   takenLocal: string | null, w: number | null, h: number | null, durationSec: number | null, hasDisplay: boolean,
- *   urls: { t400: string, t1200: string, display: string, original: string, download: string } }} StoryItem
+ *   urls: { t400: string, t1200: string, t2400: string, display: string, original: string, download: string } }} StoryItem
  */
 
 /** "day two/é.png" → "day%20two/%C3%A9.png" (each segment encoded, slashes kept). @param {string} p */
@@ -41,6 +41,8 @@ export function storyItem(it) {
     urls: {
       t400: `/media/local/thumb/${enc}?w=400&v=${v}`,
       t1200: `/media/local/thumb/${enc}?w=1200&v=${v}`,
+      // For the largest images (a chapter's cover, full-width rows) on 2x/3x screens.
+      t2400: `/media/local/thumb/${enc}?w=2400&v=${v}`,
       display: `/media/local/display/${enc}`,
       original: `/media/local/original/${enc}`,
       download: `/media/local/original/${enc}?download=1`,
@@ -60,7 +62,15 @@ export function draftFolder(list, { title, today }) {
   const { chapter, pages } = draftFolderChapter({
     id: FOLDER_CHAPTER_ID,
     title,
-    items: items.map((it) => ({ id: it.id, name: it.name, index: it.index, takenLocal: it.takenLocal, kind: it.kind })),
+    // dir: a curated workspace with numbered subfolders reads folder by folder.
+    items: list.map((it, i) => ({
+      id: items[i].id,
+      name: it.name,
+      index: it.index,
+      takenLocal: items[i].takenLocal,
+      kind: items[i].kind,
+      dir: it.path.includes('/') ? it.path.slice(0, it.path.lastIndexOf('/')) : '',
+    })),
     curated: isCuratedNames(list.map((it) => it.name)),
     today,
   });

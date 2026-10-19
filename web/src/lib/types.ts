@@ -6,6 +6,8 @@ export type ChapterStatus = 'upcoming' | 'ongoing' | 'past' | 'someday';
 export interface ItemUrls {
   t400: string;
   t1200: string;
+  /** For the largest images (a chapter's cover, full-width rows) on 2x/3x screens. */
+  t2400: string;
   display: string;
   original: string;
   download: string;

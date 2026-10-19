@@ -156,13 +156,16 @@ $env:GOPRO_TEST_LINK="https://gopro.com/v/…"; node test/run.mjs  # PowerShell
 The end-to-end check reads the built app in headless Chromium (Playwright) on an
 Android-sized phone and a desktop, light and dark, against a generated trip of 24 photos
 and 2 videos: cover, story, viewer (swipes and keys), details, Play, settings, the old
-board at `/board/`, and offline from the service worker with the server stopped. It needs
+board at `/board/`; then the service worker: offline after one visit (story, viewer, Play), a
+proxy answering 502 as `tailscale serve` does with Atlas stopped, a slow laptop, a new deploy,
+and a server without ImageMagick. It needs
 `npm run build` first and a Chromium for Playwright (`npx playwright install chromium`, or
 `PLAYWRIGHT_BROWSERS_PATH` pointing at one); without Playwright it prints SKIP.
 
 ```
 npm run e2e                          # node test/e2e.mjs
 node test/e2e.mjs --shots ./shots    # also saves screenshots of every screen
+node test/e2e.mjs --only offline     # only the tests whose name contains "offline"
 ```
 
 ## Troubleshooting

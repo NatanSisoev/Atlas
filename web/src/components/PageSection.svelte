@@ -55,7 +55,7 @@
   </header>
   <div class="rows" style:width="{width}px" style:--gap="{spacing}px">
     {#each rows as row, r (r)}
-      <div class="row" class:centered={row.centered}>
+      <div class="row" class:short={row.short}>
         {#each row.tiles as tile (tile.id)}
           <MediaTile
             item={items[tile.id]}
@@ -100,10 +100,6 @@
     display: flex;
     align-items: flex-start;
     gap: var(--gap);
-  }
-
-  .row.centered {
-    justify-content: center;
   }
 
   @media (min-width: 720px) {

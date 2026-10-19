@@ -1,6 +1,6 @@
 <!-- Chapter story: a full-bleed cover that collapses into a slim bar, then page after page. -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import Icon from './Icon.svelte';
   import PageSection from './PageSection.svelte';
   import Viewer from './Viewer.svelte';
@@ -8,10 +8,11 @@
   import { chapterStats } from '../lib/format';
   import { plateText } from '../lib/plates';
   import { coverPath, itemPath, leaveTo, navigate, playPath, router } from '../lib/router.svelte';
-  import { cachedChapter, chapterSummary, loadChapter, seedSrc, vt } from '../lib/store.svelte';
+  import { cachedChapter, chapterSummary, loadChapter, retryWhileStale, seedSrc, store, vt } from '../lib/store.svelte';
   import type { ChapterData, ChapterSummary } from '../lib/types';
   import { motion, viewport } from '../lib/viewport.svelte';
   import { enterFullscreen } from '../lib/fullscreen';
+  import { coverSizes, largeSrcset } from '../lib/sizes';
 
   let {
     id,
@@ -22,6 +23,7 @@
   const initial = () => cachedChapter(id);
   let data = $state<ChapterData | null>(initial()?.data ?? null);
   let fromCache = $state(initial()?.fromCache ?? false);
+  let slow = $state(initial()?.slow ?? false);
   let error = $state<ApiError | null>(null);
   let loading = $state(false);
 
@@ -36,6 +38,7 @@
       .then((res) => {
         data = res.data;
         fromCache = res.fromCache;
+        slow = res.slow;
       })
       .catch((err: unknown) => {
         if (!data) error = err instanceof ApiError ? err : new ApiError(0, 'network');
@@ -51,6 +54,25 @@
     };
     document.addEventListener('visibilitychange', refresh);
     return () => document.removeEventListener('visibilitychange', refresh);
+  });
+
+  // The service worker handed over a fresh copy (it had answered from its cache: slow laptop).
+  $effect(() => {
+    void store.chapterEpoch;
+    untrack(() => {
+      const c = cachedChapter(id);
+      if (c && c.data !== data && !c.fromCache) {
+        data = c.data;
+        fromCache = false;
+        slow = false;
+      }
+    });
+  });
+
+  // While a saved copy is shown, keep trying quietly (network back, laptop awake again).
+  $effect(() => {
+    if (!fromCache) return;
+    return retryWhileStale(load);
   });
 
   $effect(() => {
@@ -107,7 +129,12 @@
     leaveTo(coverPath());
   }
 
-  const heroName = $derived(vt.hero === id && router.route.name === 'chapter' && !motion.reduced ? 'hero' : null);
+  // The hero's box: full width, min(118vw, 70svh) tall on a phone, min(72vh, 56vw) on a desktop.
+  const heroH = $derived(viewport.desktop ? Math.min(viewport.h * 0.72, viewport.w * 0.56) : Math.min(viewport.w * 1.18, viewport.h * 0.7));
+
+  // Cover <-> Story: the chapter in transit morphs its image and its words.
+  const inTransit = $derived(vt.hero === id && router.route.name === 'chapter' && !motion.reduced);
+  const heroName = $derived(inTransit ? 'hero' : null);
   const mediaName = $derived(router.route.name === 'chapter' && !motion.reduced ? vt.media : null);
   const hrefFor = (itemId: string) => itemPath(id, itemId);
 </script>
@@ -132,6 +159,8 @@
         <div class="hero-media" bind:this={heroEl}>
           <img
             src={cover.urls.t1200}
+            srcset={largeSrcset(cover)}
+            sizes={coverSizes(viewport.w, heroH, cover)}
             alt=""
             decoding="sync"
             fetchpriority="high"
@@ -139,11 +168,15 @@
           />
         </div>
       {/if}
-      <div class="hero-text">
+      <div class="hero-text" style:view-transition-name={inTransit ? 'chapter-words' : null}>
         {#if summary.range}<p class="t-kicker">{summary.range}</p>{/if}
         <h1 class="t-title">{summary.title}</h1>
         <p class="t-meta stats">{chapterStats(summary)}</p>
-        {#if fromCache}<p class="t-meta offline-note" role="status">Offline · showing the last saved copy</p>{/if}
+        {#if fromCache}
+          <p class="t-meta offline-note" role="status">
+            {slow ? 'The laptop is slow to answer' : 'Offline'} · showing the last saved copy
+          </p>
+        {/if}
       </div>
     </header>
   {:else if !error}
@@ -211,7 +244,7 @@
 </div>
 
 {#if viewerItem && data}
-  <Viewer chapterId={id} chapterTitle={data.chapter.title} {order} items={data.items} itemId={viewerItem} />
+  <Viewer chapterId={id} chapterTitle={data.chapter.title} {order} items={data.items} itemId={viewerItem} {aspects} />
 {/if}
 
 <style>
@@ -221,18 +254,21 @@
   }
 
   /* ---- bar ---- */
+  /* Two equal side tracks (wider than the Play pill) and the same padding on both sides, so the
+     title is centred on the screen, not in what the pill leaves. */
   .bar {
+    --bar-pad: calc(max(var(--safe-left), var(--safe-right)) + 8px);
     position: fixed;
     z-index: 20;
     top: 0;
     left: 0;
     right: 0;
     display: grid;
-    grid-template-columns: 44px 1fr auto;
+    grid-template-columns: 88px minmax(0, 1fr) 88px;
     align-items: center;
     gap: 8px;
     height: calc(var(--bar-h) + var(--safe-top));
-    padding: var(--safe-top) calc(var(--safe-right) + 8px) 0 calc(var(--safe-left) + 4px);
+    padding: var(--safe-top) var(--bar-pad) 0;
     color: var(--ink);
     background: transparent;
     transition:
@@ -254,6 +290,15 @@
 
   .bar.over-hero:not(.solid) :global(:focus-visible) {
     outline-color: #fff;
+  }
+
+  .bar > .icon-btn {
+    justify-self: start;
+  }
+
+  /* The bar sits at the top edge: the ring stays inside the button (not cut off above it). */
+  .bar .icon-btn:focus-visible {
+    outline-offset: -2px;
   }
 
   .bar-title {
@@ -278,6 +323,13 @@
     font-size: 15px;
   }
 
+  /* Newsreader's deep descent puts its capitals above the line's centre: move the text itself
+     (not the box) down to the arrow's and the Play label's centre. */
+  :global(:root:not([data-type='sans'])) .bar-title {
+    position: relative;
+    top: 2.5px;
+  }
+
   .bar.solid .bar-title {
     opacity: 1;
     transform: none;
@@ -285,6 +337,11 @@
 
   .bar-spacer {
     width: 44px;
+  }
+
+  .play,
+  .bar-spacer {
+    justify-self: end;
   }
 
   .play {
@@ -316,10 +373,21 @@
   .bar.over-hero:not(.solid) .play {
     color: #111;
     background: rgba(255, 255, 255, 0.92);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.08),
+      0 1px 3px rgba(0, 0, 0, 0.18);
+  }
+
+  /* Over the photo the white arrow gets a dark backing of its own: a bright sky alone would leave
+     it at about 2.3:1. It fades out when the bar turns solid. */
+  .bar.over-hero:not(.solid) .icon-btn {
+    background: rgba(0, 0, 0, 0.28);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
   }
 
   .bar.over-hero:not(.solid) .icon-btn:hover {
-    background: rgba(255, 255, 255, 0.16);
+    background: rgba(0, 0, 0, 0.4);
   }
 
   /* ---- hero ---- */
@@ -500,8 +568,7 @@
 
   @media (min-width: 720px) {
     .bar {
-      padding-left: calc(var(--safe-left) + 12px);
-      padding-right: calc(var(--safe-right) + 16px);
+      --bar-pad: calc(max(var(--safe-left), var(--safe-right)) + 16px);
     }
     .hero-media {
       height: min(72vh, 56vw);

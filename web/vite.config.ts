@@ -6,12 +6,18 @@ import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { APP_CSP, SECURITY_HEADERS } from '../src/security.js';
 
 const webRoot = fileURLToPath(new URL('.', import.meta.url));
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const atlasUrl = process.env.ATLAS_URL || 'http://127.0.0.1:5180';
 
 const PAPER = '#F7F6F2';
+
+// The precached shell keeps the headers it was fetched with. Tie its revision to the server's
+// policy too, so a rebuild after a CSP or header change refreshes installed copies.
+const policyHash = createHash('sha1').update(APP_CSP + JSON.stringify(SECURITY_HEADERS)).digest('hex').slice(0, 12);
 
 export default defineConfig({
   root: webRoot,
@@ -44,7 +50,9 @@ export default defineConfig({
       srcDir: 'src',
       filename: 'sw.ts',
       registerType: 'autoUpdate',
-      injectRegister: 'script', // registerSW.js file, no inline script (CSP script-src 'self')
+      // Registered from the bundle (src/lib/updates.ts via virtual:pwa-register): no inline script
+      // (CSP script-src 'self'), and the page reloads into a new deploy when its worker activates.
+      injectRegister: false,
       manifestFilename: 'manifest.webmanifest',
       includeManifestIcons: false, // the icons are already in globPatterns (no duplicate precache entries)
       manifest: {
@@ -69,6 +77,12 @@ export default defineConfig({
         globPatterns: ['**/*.{html,js,css,woff2,png}'], // the manifest is added by the plugin
         globIgnores: ['sw.js'],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+        manifestTransforms: [
+          async (entries) => ({
+            manifest: entries.map((e) => (e.url === 'index.html' ? { ...e, revision: `${e.revision}-${policyHash}` } : e)),
+            warnings: [],
+          }),
+        ],
       },
       devOptions: { enabled: false },
     }),
